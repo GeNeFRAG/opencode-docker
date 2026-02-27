@@ -1,0 +1,103 @@
+# ═══════════════════════════════════════════════════════════════════
+# OpenCode Web — Multi-Repo Setup
+# Each repo gets its own service, port, and data volume.
+# Add more repos by copying any service block and changing:
+#   - service name, container_name, port, WORKSPACE_REPO, volume names
+# ═══════════════════════════════════════════════════════════════════
+
+x-opencode-common: &opencode-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment:
+    - NODE_EXTRA_CA_CERTS=/certs/zscaler.pem
+    - REQUESTS_CA_BUNDLE=/certs/zscaler.pem
+  volumes: &opencode-volumes
+    # ─── OpenCode config (commands, skills, plugins) ───────────
+    - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
+    - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
+    - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
+    - ${HOME}/.config/opencode/opencode_nottokens.json:/root/.config/opencode/opencode_nottokens.json:ro
+    # ─── Agent skills ─────────────────────────────────────────
+    - ${HOME}/.agents/skills:/root/.agents/skills:ro
+    # ─── Docker socket (for MCP containers) ───────────────────
+    - /var/run/docker.sock:/var/run/docker.sock
+    # ─── SSH & Git ────────────────────────────────────────────
+    - ${HOME}/.ssh:/root/.ssh:ro
+    - ${HOME}/.gitconfig:/root/.gitconfig:ro
+    # ─── Zscaler CA cert ──────────────────────────────────────
+    - ${HOME}/tls-ca-bundle_3.pem:/certs/zscaler.pem:ro
+  deploy:
+    resources:
+      limits:
+        memory: 4G
+      reservations:
+        memory: 1G
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # Mercury — http://localhost:3001
+  # ─────────────────────────────────────────────────────────────
+  mercury:
+    <<: *opencode-common
+    container_name: opencode-mercury
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_EXTRA_CA_CERTS=/certs/zscaler.pem
+      - REQUESTS_CA_BUNDLE=/certs/zscaler.pem
+      - OPENCODE_PORT=3001
+    volumes:
+      - ${REPOS_PATH:-~/LocalCode/Code}/Mercury:/workspace
+      - opencode-data-mercury:/root/.local/share/opencode
+      - opencode-memory-mercury:/root/.config/opencode/memory
+      # Inherit shared mounts
+      - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
+      - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
+      - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
+      - ${HOME}/.config/opencode/opencode_nottokens.json:/root/.config/opencode/opencode_nottokens.json:ro
+      - ${HOME}/.agents/skills:/root/.agents/skills:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.ssh:/root/.ssh:ro
+      - ${HOME}/.gitconfig:/root/.gitconfig:ro
+      - ${HOME}/tls-ca-bundle_3.pem:/certs/zscaler.pem:ro
+
+  # ─────────────────────────────────────────────────────────────
+  # ArmaReforger — http://localhost:3002
+  # ─────────────────────────────────────────────────────────────
+  arma-reforger:
+    <<: *opencode-common
+    container_name: opencode-arma-reforger
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_EXTRA_CA_CERTS=/certs/zscaler.pem
+      - REQUESTS_CA_BUNDLE=/certs/zscaler.pem
+      - OPENCODE_PORT=3002
+    volumes:
+      - ${REPOS_PATH:-~/LocalCode/Code}/ArmaReforger:/workspace
+      - opencode-data-arma:/root/.local/share/opencode
+      - opencode-memory-arma:/root/.config/opencode/memory
+      # Inherit shared mounts
+      - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
+      - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
+      - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
+      - ${HOME}/.config/opencode/opencode_nottokens.json:/root/.config/opencode/opencode_nottokens.json:ro
+      - ${HOME}/.agents/skills:/root/.agents/skills:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.ssh:/root/.ssh:ro
+      - ${HOME}/.gitconfig:/root/.gitconfig:ro
+      - ${HOME}/tls-ca-bundle_3.pem:/certs/zscaler.pem:ro
+
+volumes:
+  opencode-data-mercury:
+    name: opencode-data-mercury
+  opencode-memory-mercury:
+    name: opencode-memory-mercury
+  opencode-data-arma:
+    name: opencode-data-arma
+  opencode-memory-arma:
+    name: opencode-memory-arma
