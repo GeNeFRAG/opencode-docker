@@ -7,7 +7,7 @@ TEMPLATE="/opt/opencode/opencode.json.template"
 CONFIG_FILE="${CONFIG_DIR}/opencode.json"
 
 echo "╔══════════════════════════════════════════╗"
-echo "║       OpenCode Web - Docker Container     ║"
+echo "║       OpenCode Web - Docker Container    ║"
 echo "╚══════════════════════════════════════════╝"
 
 # ─── Generate opencode.json from template + env vars ───────────────
