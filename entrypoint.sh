@@ -73,6 +73,16 @@ export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="safe.directory"
 export GIT_CONFIG_VALUE_0="/workspace"
 
+# ─── Expose /workspace under $HOME for "Open project" dialog ──────
+# The web UI searches $HOME for project directories. Inside Docker,
+# /root only has dotfiles which are filtered out, so the dialog is
+# empty. Symlinking /workspace into $HOME makes it discoverable.
+WORKSPACE_NAME="$(basename "$(cd /workspace && git rev-parse --show-toplevel 2>/dev/null || echo /workspace)")"
+if [ ! -e "${HOME}/${WORKSPACE_NAME}" ]; then
+    ln -sf /workspace "${HOME}/${WORKSPACE_NAME}"
+    echo "  ✓ Symlinked /workspace → ~/${WORKSPACE_NAME}"
+fi
+
 # ─── Start prefill proxy (strips trailing assistant messages) ─────
 echo "→ Starting prefill proxy on 127.0.0.1:18080 → ${LLM_BASE_URL}..."
 UPSTREAM_URL="${LLM_BASE_URL}" PROXY_PORT=18080 \
@@ -92,6 +102,7 @@ echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
 echo ""
 
 # ─── Start opencode web ──────────────────────────────────────────
+cd /workspace
 exec opencode web \
     --hostname 0.0.0.0 \
     --port "${OPENCODE_PORT:-3000}" \
