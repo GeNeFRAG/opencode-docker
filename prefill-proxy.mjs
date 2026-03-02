@@ -30,6 +30,27 @@ if (!UPSTREAM_URL) {
 
 const upstream = new URL(UPSTREAM_URL);
 
+/* ── Connection pooling (keep-alive agents) ────────────────────────── */
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 16,          // max parallel upstream connections
+  maxFreeSockets: 8,       // idle connections kept alive for reuse
+  scheduling: "fifo",      // reuse the most-recently-freed socket
+});
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 16,
+  maxFreeSockets: 8,
+  scheduling: "fifo",
+});
+
+const transport = upstream.protocol === "https:" ? https : http;
+const agent = upstream.protocol === "https:" ? httpsAgent : httpAgent;
+
 /* ── Logging ───────────────────────────────────────────────────────── */
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -104,9 +125,53 @@ function summariseRequest(body) {
   return parts.join(" ");
 }
 
+/* ── Shared upstream handlers ──────────────────────────────────────── */
+
+function handleUpstreamResponse(proxyRes, res, id, startTime) {
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  const status = proxyRes.statusCode;
+  const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
+  log[level](
+    `[${id}] <-- ${status} ${http.STATUS_CODES[status]} (${elapsed}s ttfb)`
+  );
+  log.debug(`[${id}] Response headers: ${JSON.stringify(proxyRes.headers)}`);
+
+  res.writeHead(proxyRes.statusCode, proxyRes.headers);
+  proxyRes.pipe(res);
+
+  proxyRes.on("end", () => {
+    activeRequests--;
+    const total = ((performance.now() - startTime) / 1000).toFixed(2);
+    log.info(`[${id}] Completed in ${total}s (active=${activeRequests})`);
+  });
+}
+
+function handleTimeout(proxyReq, id) {
+  log.error(`[${id}] Upstream timeout after 300s`);
+  proxyReq.destroy(new Error("Upstream timeout (300s)"));
+}
+
+function handleProxyError(err, res, id, startTime) {
+  activeRequests--;
+  totalErrors++;
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  log.error(`[${id}] Upstream error after ${elapsed}s: ${err.message}`);
+  if (!res.headersSent) {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }));
+  }
+}
+
+function handleClientDisconnect(proxyReq, id) {
+  if (!proxyReq.destroyed) {
+    log.warn(`[${id}] Client disconnected, aborting upstream request`);
+    proxyReq.destroy();
+  }
+}
+
 /* ── Server ────────────────────────────────────────────────────────── */
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
   const id = reqId();
   const startTime = performance.now();
   totalRequests++;
@@ -115,15 +180,54 @@ const server = http.createServer(async (req, res) => {
   log.info(`[${id}] --> ${req.method} ${req.url} (active=${activeRequests})`);
   log.debug(`[${id}] Request headers: ${JSON.stringify(req.headers)}`);
 
-  // Collect request body
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  let rawBody = Buffer.concat(chunks);
-
   const isChatCompletion =
     req.url?.includes("/chat/completions") && req.method === "POST";
 
-  if (isChatCompletion) {
+  // Build upstream URL once
+  const targetUrl = new URL(req.url, UPSTREAM_URL);
+  log.debug(`[${id}] Forwarding to ${targetUrl.toString()}`);
+
+  // Forward headers, updating host; signal keep-alive to upstream
+  const fwdHeaders = { ...req.headers, host: upstream.host, connection: "keep-alive" };
+
+  // Shared upstream request options
+  const reqOpts = {
+    method: req.method,
+    headers: fwdHeaders,
+    agent,
+    rejectUnauthorized: true,
+    timeout: 300_000,
+  };
+
+  /**
+   * Fast path: non-chat-completion requests are piped straight through
+   * with zero buffering — saves memory and reduces TTFB.
+   */
+  if (!isChatCompletion) {
+    log.debug(`[${id}] Passthrough (not chat/completions)`);
+
+    const proxyReq = transport.request(
+      targetUrl,
+      reqOpts,
+      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime)
+    );
+
+    proxyReq.on("timeout", () => handleTimeout(proxyReq, id));
+    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime));
+    res.on("close", () => handleClientDisconnect(proxyReq, id));
+
+    req.pipe(proxyReq);
+    return;
+  }
+
+  /**
+   * Chat completion path: buffer body → strip assistant messages → forward.
+   */
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", () => {
+    let rawBody = Buffer.concat(chunks);
+
     try {
       const body = JSON.parse(rawBody.toString());
       log.info(`[${id}] Chat completion: ${summariseRequest(body)}`);
@@ -132,93 +236,47 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       log.error(`[${id}] Failed to parse request body: ${e.message}`);
     }
-  } else {
-    log.debug(`[${id}] Passthrough (not chat/completions)`);
-  }
 
-  // Build upstream URL: upstream base + request path
-  const targetUrl = new URL(req.url, UPSTREAM_URL);
-  log.debug(`[${id}] Forwarding to ${targetUrl.toString()}`);
+    fwdHeaders["content-length"] = rawBody.length;
 
-  // Forward headers, updating host and content-length
-  const headers = { ...req.headers };
-  headers.host = upstream.host;
-  headers["content-length"] = rawBody.length;
+    const proxyReq = transport.request(
+      targetUrl,
+      reqOpts,
+      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime)
+    );
 
-  const transport = upstream.protocol === "https:" ? https : http;
+    proxyReq.on("timeout", () => handleTimeout(proxyReq, id));
+    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime));
+    res.on("close", () => handleClientDisconnect(proxyReq, id));
 
-  const proxyReq = transport.request(
-    targetUrl,
-    {
-      method: req.method,
-      headers,
-      // Respect NODE_EXTRA_CA_CERTS / system CAs
-      rejectUnauthorized: true,
-      // 5 min timeout — LLM responses can be slow but shouldn't hang forever
-      timeout: 300_000,
-    },
-    (proxyRes) => {
-      const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-      const status = proxyRes.statusCode;
-      const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
-      log[level](
-        `[${id}] <-- ${status} ${http.STATUS_CODES[status]} (${elapsed}s ttfb)`
-      );
-      log.debug(`[${id}] Response headers: ${JSON.stringify(proxyRes.headers)}`);
-
-      res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      proxyRes.pipe(res);
-
-      // Log when the full response finishes streaming
-      proxyRes.on("end", () => {
-        activeRequests--;
-        const total = ((performance.now() - startTime) / 1000).toFixed(2);
-        log.info(`[${id}] Completed in ${total}s (active=${activeRequests})`);
-      });
-    }
-  );
-
-  proxyReq.on("timeout", () => {
-    log.error(`[${id}] Upstream timeout after 300s`);
-    proxyReq.destroy(new Error("Upstream timeout (300s)"));
+    proxyReq.end(rawBody);
   });
-
-  proxyReq.on("error", (err) => {
-    activeRequests--;
-    totalErrors++;
-    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-    log.error(`[${id}] Upstream error after ${elapsed}s: ${err.message}`);
-    if (!res.headersSent) {
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }));
-    }
-  });
-
-  // Abort upstream request if client disconnects mid-stream
-  res.on("close", () => {
-    if (!proxyReq.destroyed) {
-      log.warn(`[${id}] Client disconnected, aborting upstream request`);
-      proxyReq.destroy();
-    }
-  });
-
-  proxyReq.write(rawBody);
-  proxyReq.end();
 });
 
 /* ── Startup ───────────────────────────────────────────────────────── */
 
+// Disable Nagle's algorithm for lower latency on small packets
+server.on("connection", (socket) => socket.setNoDelay(true));
+
+// Keep client connections alive to avoid TCP handshake overhead
+server.keepAliveTimeout = 60_000; // 60s idle before closing
+server.headersTimeout = 65_000;   // must be > keepAliveTimeout
+
 server.listen(PROXY_PORT, "127.0.0.1", () => {
   log.info(`Listening on http://127.0.0.1:${PROXY_PORT} -> ${UPSTREAM_URL}`);
   log.info(`Log level: ${LOG_LEVEL} (set PROXY_LOG_LEVEL=debug for verbose output)`);
+  log.info(`Keep-alive: upstream pool maxSockets=16 maxFreeSockets=8`);
 });
 
 /* ── Periodic stats (every 5 min while active) ─────────────────────── */
 
 setInterval(() => {
   if (totalRequests > 0) {
+    const poolStats = agent.freeSockets
+      ? Object.values(agent.freeSockets).reduce((n, a) => n + a.length, 0)
+      : 0;
     log.info(
-      `Stats: total_requests=${totalRequests} active=${activeRequests} stripped=${totalStripped} errors=${totalErrors}`
+      `Stats: total_requests=${totalRequests} active=${activeRequests} stripped=${totalStripped} errors=${totalErrors} pool_idle=${poolStats}`
     );
   }
 }, 5 * 60 * 1000).unref();
