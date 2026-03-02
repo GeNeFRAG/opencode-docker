@@ -80,6 +80,8 @@ const server = http.createServer(async (req, res) => {
       headers,
       // Respect NODE_EXTRA_CA_CERTS / system CAs
       rejectUnauthorized: true,
+      // 5 min timeout — LLM responses can be slow but shouldn't hang forever
+      timeout: 300_000,
     },
     (proxyRes) => {
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
@@ -87,12 +89,21 @@ const server = http.createServer(async (req, res) => {
     }
   );
 
+  proxyReq.on("timeout", () => {
+    proxyReq.destroy(new Error("Upstream timeout (300s)"));
+  });
+
   proxyReq.on("error", (err) => {
     console.error("[prefill-proxy] Upstream error:", err.message);
     if (!res.headersSent) {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }));
     }
+  });
+
+  // Abort upstream request if client disconnects mid-stream
+  res.on("close", () => {
+    if (!proxyReq.destroyed) proxyReq.destroy();
   });
 
   proxyReq.write(rawBody);
