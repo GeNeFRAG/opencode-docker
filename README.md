@@ -1,335 +1,146 @@
 # OpenCode Web — Docker
 
-Persistent AI coding agent running in Docker with a browser-based web interface. Each repo gets its own isolated container with dedicated data volumes, MCP servers, and port.
-
-## Overview
-
-- **Web UI**: Browser-based coding agent at `http://localhost:3000`
-- **Models**: Claude (Sonnet/Opus/Haiku 4.x), GPT-5/4.1/4o, o3/o4, Mistral, Llama
-- **Providers**: Any OpenAI-compatible API, OpenRouter
-- **MCP Integrations**: memory, web search, sequential thinking, time (enabled by default); GitHub, Jira, Confluence, Grafana, browser automation (available, disabled by default)
-- **Multi-repo**: Run parallel instances on different ports for different projects
-- **Runtime**: Node 22 (Bookworm Slim), Bun, Docker CLI, ripgrep, git
+Persistent AI coding agent running in Docker with a browser-based web UI. Each repo gets its own isolated container with dedicated volumes, MCP servers, and port.
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repo
 git clone <repo-url> && cd opencode-docker
-
-# 2. Copy environment template and edit
 cp .env.example .env
-vim .env          # Set LLM_BASE_URL, LLM_API_KEY, OPENCODE_MODEL at minimum
-
-# 3. (Optional) Add CA certificate for corporate proxies
-# cp /path/to/your/ca-bundle.pem ./ca-bundle.pem
-# Set CA_CERT_PATH in .env
-
-# 4. Start
+vim .env          # Set LLM_BASE_URL, LLM_API_KEY, OPENCODE_MODEL
 ./opencode-web.sh start
-
-# 5. Open browser
-# Default port 3000 (set OPENCODE_PORT in .env to change)
 open http://localhost:3000
 ```
 
-## Project Structure
+> **Corporate proxy?** Copy your CA bundle to `./ca-bundle.pem` and set `CA_CERT_PATH` in `.env`.
 
-```
-.
-├── Dockerfile                          # Multi-stage build (builder → runtime)
-├── docker-compose.yml                  # Base service definition + shared config
-├── docker-compose.override.yml.example # Template for adding your own repos
-├── docker-compose.override.yml         # Your personal repo services (gitignored)
-├── .env.example                        # Environment variable template
-├── .env                                # Your secrets and config (gitignored)
-├── entrypoint.sh                       # Container startup script
-├── opencode-web.sh                     # Host-side CLI wrapper
-├── opencode.json.template              # OpenCode config template (envsubst)
-├── prefill-proxy.mjs                   # LLM proxy (strips assistant prefill)
-├── oh-my-opencode-slim.json.example    # Agent preset/fallback config template
-├── ca-bundle.pem                       # CA certificate bundle (gitignored)
-└── .gitignore
-```
-
-## CLI Wrapper (`opencode-web.sh`)
-
-Convenience script for managing services from the host. Automatically includes `docker-compose.override.yml` if present.
+## CLI (`opencode-web.sh`)
 
 ```bash
-./opencode-web.sh start                   # Build and start all services
-./opencode-web.sh start opencode-docker   # Start only one service
-./opencode-web.sh stop                    # Stop all
-./opencode-web.sh stop my-project         # Stop one service
-./opencode-web.sh restart                 # Restart all
-./opencode-web.sh logs opencode-docker    # Follow logs for a service
-./opencode-web.sh shell opencode-docker   # Bash into a running container
-./opencode-web.sh rebuild                 # Force rebuild and start
-./opencode-web.sh status                  # Show all services
-./opencode-web.sh urls                    # Show running URLs/ports
-./opencode-web.sh down                    # Stop and remove all containers
+./opencode-web.sh start   [service]   # Build & start (all or one)
+./opencode-web.sh stop    [service]   # Stop
+./opencode-web.sh restart [service]   # Restart
+./opencode-web.sh logs    <service>   # Follow logs
+./opencode-web.sh shell   <service>   # Bash into container
+./opencode-web.sh rebuild [service]   # Force rebuild & start
+./opencode-web.sh update  [service]   # Rebuild with latest opencode-ai
+./opencode-web.sh version [service]   # Show opencode-ai version in container
+./opencode-web.sh status              # Show all services
+./opencode-web.sh urls                # Show running URLs/ports
+./opencode-web.sh down                # Stop & remove all containers
 ```
-
-## Container Startup Sequence (`entrypoint.sh`)
-
-When a container starts, the entrypoint runs these steps in order:
-
-1. **Config generation** — Runs `envsubst` on `opencode.json.template` to produce `/root/.config/opencode/opencode.json`, substituting environment variables (`LLM_BASE_URL`, `LLM_API_KEY`, `OPENCODE_MODEL`, tokens, etc.)
-2. **Auth setup** — If `LLM_API_KEY` is set, writes `/root/.local/share/opencode/auth.json` with the key for both `anthropic` and `llm` providers.
-3. **CA certificate install** — If `/certs/zscaler.pem` is mounted, copies it into the system CA store and sets `NODE_EXTRA_CA_CERTS` and `REQUESTS_CA_BUNDLE`.
-4. **Plugin install** — Runs `npm install` in the config directory if `package.json` exists (offline-first).
-5. **Project config check** — Checks for `/workspace/.opencode` directory and merges any project-level OpenCode configuration.
-6. **Docker socket check** — Verifies the Docker socket is available (`/var/run/docker.sock`) for MCP containers that require it.
-7. **Git safe.directory** — Sets `/workspace` as a safe directory for git operations (`git config --global safe.directory /workspace`).
-8. **Prefill proxy startup** — Launches `prefill-proxy.mjs` on `127.0.0.1:18080` as a background process (see below).
-9. **OpenCode web launch** — Starts `opencode web` on `0.0.0.0:${OPENCODE_PORT:-3000}`.
-
-## Prefill Proxy (`prefill-proxy.mjs`)
-
-A local HTTP proxy that sits between OpenCode and the upstream LLM API:
-
-- **Listens on**: `http://127.0.0.1:18080`
-- **Forwards to**: `$LLM_BASE_URL`
-- **Purpose**: Strips trailing assistant messages from `/chat/completions` requests. Some models (e.g., Claude 4.6) don't support assistant message prefill, but OpenCode sends them. The proxy intercepts and removes them before forwarding.
-- **Fallback**: If the proxy fails to start, the container logs a warning. You can point `opencode.json` directly at the upstream URL if needed.
-
-The `opencode.json.template` routes all LLM traffic through this proxy (`baseURL: http://127.0.0.1:18080`).
-
-### Logging
-
-The proxy logs every request with a short correlation ID (e.g., `[a3f1c2]`) so you can trace a request across all its log lines. Log output includes:
-
-- **Incoming requests** — method, URL, active connection count
-- **Chat completions** — model, message count by role, stream flag, temperature
-- **Prefill stripping** — content preview, remaining message count after stripping
-- **Upstream responses** — status code, time-to-first-byte, total stream duration
-- **Errors** — parse failures, upstream errors, timeouts (with elapsed time)
-- **Client disconnects** — logged when the client aborts mid-stream
-- **Periodic stats** — total requests, active connections, stripped messages, and errors (every 5 min)
-
-Control verbosity with `PROXY_LOG_LEVEL`:
-
-| Level | What you see |
-|-------|-------------|
-| `debug` | Everything — includes request/response headers and forwarding URLs |
-| `info` | Requests, responses, timings, stripping, stats (default) |
-| `warn` | Client disconnects, 4xx upstream responses |
-| `error` | Upstream errors, timeouts, parse failures |
-
-## Docker Build (`Dockerfile`)
-
-Multi-stage build for minimal image size:
-
-### Stage 1: Builder
-- Base: `node:22-bookworm-slim`
-- Installs build tools (`build-essential`, `python3`)
-- Installs `opencode-ai@1.2.15` globally via `npm install -g`
-- Installs provider SDKs: `@ai-sdk/openai-compatible`, `@ai-sdk/groq`, `@openrouter/ai-sdk-provider`
-- Installs MCP server packages globally via `npm install -g` (no `npx` / no registry checks at runtime):
-  - `@modelcontextprotocol/server-memory`
-  - `@upstash/context7-mcp`
-  - `@modelcontextprotocol/server-sequential-thinking`
-  - `mcp-time-server`
-  - `@playwright/mcp`
-  - `@cyanheads/git-mcp-server`
-
-### Stage 2: Runtime
-- Base: `node:22-bookworm-slim` (no build tools)
-- Runtime tools: `git`, `curl`, `openssh-client`, `jq`, `ripgrep`, `unzip`
-- Docker CLI (static binary, ~50 MB)
-- Bun runtime
-- Copies compiled `node_modules` from builder stage
-- Re-creates global bin symlinks for all installed packages — MCP servers start instantly without any npm registry checks at runtime
 
 ## Configuration
 
-### Environment Variables (`.env`)
+### Required Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `LLM_BASE_URL` | **Yes** | OpenAI-compatible API endpoint |
-| `LLM_API_KEY` | **Yes** | API key for the LLM provider |
-| `OPENCODE_MODEL` | **Yes** | Model identifier (e.g., `llm/claude-opus-4-6`) |
-| `OPENROUTER_API_KEY` | No | OpenRouter API key (for Llama, DeepSeek, etc.) |
-| `OPENCODE_PORT` | No | Web UI port (default: `3000`) |
-| `REPOS_PATH` | No | Host path to your repos (default: `~/repos`) |
-| `CA_CERT_PATH` | No | Path to CA certificate bundle on host |
-| `GITHUB_ENTERPRISE_TOKEN` | No | GitHub Enterprise PAT |
-| `GITHUB_ENTERPRISE_URL` | No | GitHub Enterprise URL |
-| `GITHUB_PERSONAL_TOKEN` | No | GitHub.com PAT |
-| `CONFLUENCE_URL` | No | Confluence instance URL |
-| `CONFLUENCE_USERNAME` | No | Confluence username/email |
-| `CONFLUENCE_TOKEN` | No | Confluence API token |
-| `JIRA_URL` | No | Jira instance URL |
-| `JIRA_USERNAME` | No | Jira username/email |
-| `JIRA_TOKEN` | No | Jira API token |
-| `GRAFANA_URL` | No | Grafana instance URL |
-| `GRAFANA_API_KEY` | No | Grafana API key |
-| `OPENCODE_EXTRA_ARGS` | No | Extra arguments passed to `opencode web` |
-| `PROXY_LOG_LEVEL` | No | Prefill proxy log level: `debug`, `info` (default), `warn`, `error` |
+Set these three in `.env`:
+
+| Variable | Description |
+|----------|-------------|
+| `LLM_BASE_URL` | OpenAI-compatible API endpoint |
+| `LLM_API_KEY` | API key for the LLM provider |
+| `OPENCODE_MODEL` | Model identifier (e.g. `llm/claude-opus-4-6`) |
+
+<details>
+<summary><strong>All environment variables</strong></summary>
+
+| Variable | Description |
+|----------|-------------|
+| `OPENCODE_PORT` | Web UI port (default: `3000`) |
+| `OPENCODE_VERSION` | Pin opencode-ai version for builds (default: `latest`) |
+| `OPENCODE_AUTOUPDATE` | Enable in-container auto-updates every 12h (default: `true`). Set `false` for notify-only. |
+| `OPENCODE_EXTRA_ARGS` | Extra arguments passed to `opencode web` |
+| `REPOS_PATH` | Host path to repos (default: `~/repos`) |
+| `CA_CERT_PATH` | CA certificate bundle path on host |
+| `PROXY_LOG_LEVEL` | Prefill proxy verbosity: `debug` / `info` (default) / `warn` / `error` |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `GITHUB_ENTERPRISE_TOKEN` | GitHub Enterprise PAT |
+| `GITHUB_ENTERPRISE_URL` | GitHub Enterprise URL |
+| `GITHUB_PERSONAL_TOKEN` | GitHub.com PAT |
+| `CONFLUENCE_URL` / `_USERNAME` / `_TOKEN` | Confluence access |
+| `JIRA_URL` / `_USERNAME` / `_TOKEN` | Jira access |
+| `GRAFANA_URL` / `GRAFANA_API_KEY` | Grafana access |
+
+</details>
+
+### Config Generation
+
+```
+.env + opencode.json.template  →  entrypoint.sh (envsubst)  →  opencode.json
+```
+
+The entrypoint substitutes only the variables listed above — it won't clobber `$schema` or other JSON references.
 
 ### Supported Models
 
-Configured in `opencode.json.template`:
+<details>
+<summary><strong>Via LLM Provider (OpenAI-compatible)</strong></summary>
 
-**Via LLM Provider (OpenAI-compatible):**
-| Model ID | Label |
-|----------|-------|
-| `claude-opus-4-6` | Claude Opus 4.6 |
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 |
-| `claude-opus-4-5` | Claude Opus 4.5 |
-| `claude-haiku-4-5` | Claude Haiku 4.5 |
-| `gpt-5` | GPT-5 |
-| `gpt-5-pro` | GPT-5 Pro |
-| `gpt-5-mini` | GPT-5 Mini |
-| `gpt-5-nano` | GPT-5 Nano |
-| `gpt-5-codex` | GPT-5 Codex |
-| `gpt-4.1` | GPT-4.1 |
-| `gpt-4.1-mini` | GPT-4.1 Mini |
-| `gpt-4.1-nano` | GPT-4.1 Nano |
-| `gpt-4o` | GPT-4o |
-| `gpt-4o-mini` | GPT-4o Mini |
-| `o3` | OpenAI o3 |
-| `o3-mini` | OpenAI o3 Mini |
-| `o3-deep-research` | OpenAI o3 Deep Research |
-| `o4-mini` | OpenAI o4 Mini |
-| `model-router` | Model Router (Auto) |
-| `Mistral-Large-3` | Mistral Large 3 |
-| `llama3-2-3b-instruct-v1` | Llama 3.2 3B Instruct |
+Claude Opus/Sonnet/Haiku 4.x · GPT-5/5-Pro/5-Mini/5-Nano/5-Codex · GPT-4.1/4.1-Mini/4.1-Nano · GPT-4o/4o-Mini · o3/o3-Mini/o3-Deep-Research · o4-Mini · Model Router · Mistral Large 3 · Llama 3.2 3B Instruct
 
-**Via OpenRouter:**
-| Model ID | Label |
-|----------|-------|
-| `meta-llama/llama-4-scout` | Llama 4 Scout (10M context) |
-| `meta-llama/llama-4-maverick` | Llama 4 Maverick (Vision) |
-| `deepseek/deepseek-r1` | DeepSeek R1 (Reasoning) |
-| `deepseek/deepseek-v3` | DeepSeek V3 |
+</details>
 
-### Config Generation Flow
+<details>
+<summary><strong>Via OpenRouter</strong></summary>
 
-```
-.env  ──→  entrypoint.sh (envsubst)  ──→  /root/.config/opencode/opencode.json
-           opencode.json.template
-```
+Llama 4 Scout (10M context) · Llama 4 Maverick (Vision) · DeepSeek R1 (Reasoning) · DeepSeek V3
 
-Only these variables are substituted (to avoid clobbering `$schema` etc.):
-`LLM_BASE_URL`, `LLM_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_MODEL`, `GITHUB_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_URL`, `GITHUB_PERSONAL_TOKEN`, `CONFLUENCE_URL`, `CONFLUENCE_USERNAME`, `CONFLUENCE_TOKEN`, `JIRA_URL`, `JIRA_USERNAME`, `JIRA_TOKEN`, `GRAFANA_URL`, `GRAFANA_API_KEY`, `CA_CERT_PATH`
+</details>
 
 ## MCP Servers
 
-| Server | Type | Enabled by Default | Description |
-|--------|------|---------------------|-------------|
-| `memory` | local | Yes | Persistent memory across sessions (`/root/.config/opencode/memory.json`) |
-| `context7` | local | Yes | Context7 knowledge search |
-| `websearch` | remote | Yes | Web search via Exa (`https://mcp.exa.ai/mcp`) |
-| `sequential-thinking` | local | Yes | Advanced multi-step reasoning |
-| `time` | local | Yes | Time/timezone utilities |
-| `github` | local (Docker) | **No** | GitHub Enterprise — requires `GITHUB_ENTERPRISE_TOKEN` |
-| `github_personal` | local (Docker) | **No** | GitHub.com — requires `GITHUB_PERSONAL_TOKEN` |
-| `mcp-atlassian` | local (Docker) | **No** | Jira + Confluence — requires Atlassian tokens |
-| `grafana` | local (Docker) | **No** | Grafana dashboards — requires `GRAFANA_API_KEY` |
-| `playwright` | local | **No** | Browser automation |
-| `git` | local | **No** | Git operations via MCP |
+| Server | Enabled | Notes |
+|--------|---------|-------|
+| `memory` | ✅ | Persistent memory (`memory.json`) |
+| `context7` | ✅ | Context7 knowledge search |
+| `websearch` | ✅ | Web search via Exa (remote) |
+| `sequential-thinking` | ✅ | Multi-step reasoning |
+| `time` | ✅ | Time/timezone utilities |
+| `github` | ❌ | GitHub Enterprise — runs in Docker, requires `GITHUB_ENTERPRISE_TOKEN` |
+| `github_personal` | ❌ | GitHub.com — runs in Docker, requires `GITHUB_PERSONAL_TOKEN` |
+| `mcp-atlassian` | ❌ | Jira + Confluence — runs in Docker, requires Atlassian tokens |
+| `grafana` | ❌ | Grafana dashboards — runs in Docker, requires `GRAFANA_API_KEY` |
+| `playwright` | ❌ | Browser automation |
+| `git` | ❌ | Git operations via MCP |
 
-**Local** servers run as Node processes inside the container. **Local (Docker)** servers launch separate Docker containers (requires Docker socket mount).
-
-To enable a disabled server, set `"enabled": true` in the template or override the generated config.
+Enabled servers run as Node processes inside the container. Docker-based servers (github, atlassian, grafana) launch separate containers via the mounted Docker socket. To enable a disabled server, set `"enabled": true` in the template.
 
 ## Plugin: oh-my-opencode-slim
 
-The `oh-my-opencode-slim` plugin controls which models, skills, MCP servers, and fallback chains each agent role uses.
-
-### Setup
+Controls which models, skills, MCP servers, and fallback chains each agent role uses.
 
 ```bash
-# Copy the template to your OpenCode config directory
 cp oh-my-opencode-slim.json.example ~/.config/opencode/oh-my-opencode-slim.json
 ```
 
-The file is **mounted read-only** into containers via `docker-compose.yml`. The `@opencode-ai/plugin` package (pre-installed in the image) loads it at startup. It is registered in `opencode.json` as:
-
-```json
-"plugin": ["oh-my-opencode-slim"]
-```
-
-### Config Structure
-
-```jsonc
-{
-  // Active preset name
-  "preset": "default",
-
-  // Named presets — switch by changing "preset" above
-  "presets": {
-    "default": { ... },
-    "copilot": { ... },
-    "budget":  { ... }
-  },
-
-  // Model fallback when primary is unavailable or times out
-  "fallback": {
-    "enabled": true,
-    "timeoutMs": 15000,
-    "chains": { ... }
-  }
-}
-```
-
-### Agent Roles
-
-Each preset defines six agent roles:
-
-| Role | Purpose | Default Model | Default Variant |
-|------|---------|---------------|-----------------|
-| `orchestrator` | Top-level planning, delegation, tool use | `llm/claude-opus-4-6` | — |
-| `oracle` | Deep reasoning, architecture decisions | `llm/claude-opus-4-6` | `high` |
-| `librarian` | Docs lookup, library research | `llm/claude-sonnet-4-6` | `low` |
-| `explorer` | Fast codebase search, file discovery | `llm/claude-haiku-4-5` | `low` |
-| `designer` | UI/UX, styling, visual polish | `llm/claude-opus-4-6` | `medium` |
-| `fixer` | Targeted code fixes, implementation | `llm/claude-sonnet-4-6` | `low` |
-
-### Role Configuration Fields
-
-Each role accepts these fields:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `model` | string | Model identifier (`provider/model-id`) |
-| `variant` | `"high"` \| `"medium"` \| `"low"` | Quality/cost trade-off |
-| `skills` | string[] | Skills available: `["*"]` = all, `[]` = none, or named list |
-| `mcps` | string[] | MCP server names from `opencode.json` to enable for this role |
+The file is mounted read-only into containers and loaded by `@opencode-ai/plugin` at startup.
 
 ### Presets
 
-The template ships with three presets:
+Switch by setting `"preset"` in the JSON file:
 
-**`default`** — Full quality using Claude models:
-```jsonc
-"orchestrator": { "model": "llm/claude-opus-4-6",   "skills": ["*"],              "mcps": ["websearch", "sequential-thinking", "memory", "time"] },
-"oracle":       { "model": "llm/claude-opus-4-6",   "variant": "high",            "mcps": ["sequential-thinking"] },
-"librarian":    { "model": "llm/claude-sonnet-4-6",  "variant": "low",             "mcps": ["websearch", "context7"] },
-"explorer":     { "model": "llm/claude-haiku-4-5",   "variant": "low",             "mcps": [] },
-"designer":     { "model": "llm/claude-opus-4-6",   "variant": "medium",           "mcps": [], "skills": ["agent-browser"] },
-"fixer":        { "model": "llm/claude-sonnet-4-6",  "variant": "low",             "mcps": ["memory"] }
-```
+| Preset | Description |
+|--------|-------------|
+| `default` | Full quality — Opus for orchestrator/oracle/designer, Sonnet for librarian/fixer, Haiku for explorer |
+| `copilot` | All agents via GitHub Copilot (Grok) |
+| `budget` | Cost-optimised — Sonnet for orchestrator/oracle/designer, Haiku for librarian/explorer/fixer |
 
-**`copilot`** — All agents via GitHub Copilot (Grok):
-```jsonc
-// Every role uses: "model": "github-copilot/grok-code-fast-1"
-```
+### Agent Roles
 
-**`budget`** — Cost-optimised using smaller models:
-```jsonc
-"orchestrator": { "model": "llm/claude-sonnet-4-6" },
-"oracle":       { "model": "llm/claude-sonnet-4-6" },
-"librarian":    { "model": "llm/claude-haiku-4-5" },
-"explorer":     { "model": "llm/claude-haiku-4-5" },
-"designer":     { "model": "llm/claude-sonnet-4-6" },
-"fixer":        { "model": "llm/claude-haiku-4-5" }
-```
+| Role | Purpose |
+|------|---------|
+| `orchestrator` | Top-level planning, delegation, tool use |
+| `oracle` | Deep reasoning, architecture decisions |
+| `librarian` | Docs lookup, library research |
+| `explorer` | Fast codebase search, file discovery |
+| `designer` | UI/UX, styling, visual polish |
+| `fixer` | Targeted code fixes, implementation |
 
-### Fallback Chains
+Each role accepts: `model`, `variant` (`high`/`medium`/`low`), `skills` (array), `mcps` (array of server names).
+
+<details>
+<summary><strong>Fallback chains</strong></summary>
 
 When a primary model is unavailable or exceeds `timeoutMs` (default 15s), the next model in the chain is tried:
 
@@ -338,38 +149,31 @@ When a primary model is unavailable or exceeds `timeoutMs` (default 15s), the ne
   "enabled": true,
   "timeoutMs": 15000,
   "chains": {
-    "orchestrator": ["llm/claude-sonnet-4-6", "llm/claude-sonnet-4-5", "llm/gpt-5", "openrouter/deepseek/deepseek-v3"],
-    "oracle":       ["llm/o3", "llm/claude-sonnet-4-6", "openrouter/deepseek/deepseek-r1", "llm/gpt-5"],
-    "designer":     ["llm/claude-sonnet-4-6", "llm/claude-opus-4-5", "openrouter/meta-llama/llama-4-maverick", "llm/gpt-5"],
+    "orchestrator": ["llm/claude-sonnet-4-6", "llm/claude-sonnet-4-5", "llm/gpt-5"],
+    "oracle":       ["llm/o3", "llm/claude-sonnet-4-6", "openrouter/deepseek/deepseek-r1"],
+    "designer":     ["llm/claude-sonnet-4-6", "llm/claude-opus-4-5"],
     "explorer":     ["llm/claude-haiku-4-5", "llm/gpt-4.1-mini"],
-    "librarian":    ["llm/claude-sonnet-4-5", "openrouter/meta-llama/llama-4-scout", "llm/gpt-5-mini"],
-    "fixer":        ["llm/claude-sonnet-4-5", "llm/gpt-5-codex", "openrouter/deepseek/deepseek-r1"]
+    "librarian":    ["llm/claude-sonnet-4-5", "openrouter/meta-llama/llama-4-scout"],
+    "fixer":        ["llm/claude-sonnet-4-5", "llm/gpt-5-codex"]
   }
 }
 ```
 
-### Customisation
+Disable with `"fallback": { "enabled": false }`.
 
-Edit `~/.config/opencode/oh-my-opencode-slim.json` on the host. Changes take effect on next container start.
-
-Common customisations:
-- **Switch preset**: Change `"preset": "budget"` to use cheaper models
-- **Swap a model**: Replace any model ID (e.g., use GPT-5 for orchestrator)
-- **Add MCP access**: Add `"github"` to a role's `mcps` array
-- **Disable fallback**: Set `"fallback": { "enabled": false }`
-- **Create a custom preset**: Add a new key under `"presets"` and set `"preset"` to its name
+</details>
 
 ## Multi-Repo Setup
 
-Each project gets its own container, port, data volume, and memory store.
+Each project gets its own container, port, and data volumes.
 
-### 1. Create your override file
+**1.** Create your override file:
 
 ```bash
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-### 2. Add a service per repo
+**2.** Add a service per repo (see the example file for full template):
 
 ```yaml
 services:
@@ -381,116 +185,134 @@ services:
     ports:
       !override
       - "3001:3001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/"]
     environment:
       !override
-      - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
-      - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
       - OPENCODE_PORT=3001
     volumes:
       !override
       - ${REPOS_PATH:-~/repos}/my-project:/workspace
       - opencode-data-my-project:/root/.local/share/opencode
-      - opencode-memory-my-project:/root/.config/opencode/memory
-      - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
-      - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
-      - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
-      - ${HOME}/.agents/skills:/root/.agents/skills:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.ssh:/root/.ssh:ro
-      - ${HOME}/.gitconfig:/root/.gitconfig:ro
-      - ${CA_CERT_PATH:-/dev/null}:/certs/ca-bundle.pem:ro
-
-volumes:
-  opencode-data-my-project:
-    name: opencode-data-my-project
-  opencode-memory-my-project:
-    name: opencode-memory-my-project
+      # ... (see docker-compose.override.yml.example for all mounts)
 ```
 
-> **Note:** `!override` (Docker Compose v2.24+) replaces inherited lists instead of merging them.
+> `!override` (Docker Compose v2.24+) replaces inherited lists instead of merging.
 
-### 3. Start
+**3.** Start:
 
 ```bash
-./opencode-web.sh start                   # All services
-./opencode-web.sh start my-project        # Just one
+./opencode-web.sh start my-project
 ```
 
-## Volumes
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Container won't start | `./opencode-web.sh logs <service>` — check for errors |
+| LLM API errors | Verify `LLM_BASE_URL` / `LLM_API_KEY` in `.env`. Check for `✓ Prefill proxy running` in logs. Set `PROXY_LOG_LEVEL=debug` for details. |
+| "Model does not support assistant prefill" | Prefill proxy handles this — look for `✗ Prefill proxy failed to start` in logs |
+| MCP Docker servers not working | Check for `✓ Docker socket available` in logs. Pull image manually if needed. |
+| Port conflict | Change port in override: `ports: ["3001:3001"]` + `OPENCODE_PORT=3001` |
+| Need a shell | `./opencode-web.sh shell <service>` |
+
+## Auto-Update
+
+Containers automatically check for new `opencode-ai` releases every 12 hours.
+
+- **Enabled by default** — set `OPENCODE_AUTOUPDATE=false` in `.env` to disable
+- When enabled: installs the new version and restarts `opencode web` in-place (sessions persist on disk — the web UI reconnects)
+- When disabled: logs a notification about the available update but doesn't install it
+- **Manual update**: `./opencode-web.sh update [service]` rebuilds the image with the latest version
+- **Check version**: `./opencode-web.sh version [service]`
+- **Pin version**: Set `OPENCODE_VERSION=1.2.15` in `.env` to lock the build to a specific release
+
+---
+
+<details>
+<summary><strong>Internals: Container Startup Sequence</strong></summary>
+
+When a container starts, `entrypoint.sh` runs these steps:
+
+1. **Config generation** — `envsubst` on `opencode.json.template` → `opencode.json`
+2. **Auth setup** — Writes `auth.json` with `LLM_API_KEY` for anthropic/llm providers
+3. **CA certificate install** — If `/certs/ca-bundle.pem` is mounted and non-empty, installs into system store + sets `NODE_EXTRA_CA_CERTS`
+4. **Plugin install** — `npm install` in config dir if `package.json` exists
+5. **Project config check** — Detects `/workspace/.opencode` project-level config
+6. **Docker socket check** — Verifies `/var/run/docker.sock` for MCP containers
+7. **Git safe.directory** — Exports `GIT_CONFIG_*` env vars to mark `/workspace` as safe
+8. **Workspace symlink** — Symlinks `/workspace` into `$HOME` so the web UI "Open project" dialog can discover it
+9. **Prefill proxy** — Launches `prefill-proxy.mjs` on `127.0.0.1:18080`
+10. **Auto-update cron** — Installs a 12-hourly cron job (update or notify-only, per `OPENCODE_AUTOUPDATE`)
+11. **OpenCode web** — Starts in a restart loop on `0.0.0.0:${OPENCODE_PORT:-3000}` (loop enables auto-update restarts)
+
+</details>
+
+<details>
+<summary><strong>Internals: Prefill Proxy</strong></summary>
+
+A local HTTP proxy between OpenCode and the upstream LLM API:
+
+- **Listens**: `127.0.0.1:18080` → **Forwards to**: `$LLM_BASE_URL`
+- **Purpose**: Strips trailing assistant messages from `/chat/completions` — some models don't support prefill but OpenCode sends it
+- **Logging**: Each request gets a correlation ID (e.g. `[a3f1c2]`). Logs include timings, message counts, stripping events, and periodic stats.
+- **Log levels**: `debug` (everything + headers) · `info` (default) · `warn` (disconnects, 4xx) · `error` (failures, timeouts)
+
+</details>
+
+<details>
+<summary><strong>Internals: Docker Build</strong></summary>
+
+Multi-stage build for minimal image size:
+
+**Builder stage** — `node:22-bookworm-slim` with build tools. Installs `opencode-ai` (version set by `OPENCODE_VERSION` build arg, default `latest`), provider SDKs (`@ai-sdk/openai-compatible`, `@ai-sdk/groq`, `@openrouter/ai-sdk-provider`), and MCP servers globally.
+
+**Runtime stage** — `node:22-bookworm-slim` (no build tools). Adds `git`, `curl`, `jq`, `ripgrep`, `openssh-client`, `unzip`, `cron`, `tini` (PID 1), Docker CLI, and Bun. Copies `node_modules` from builder and re-creates bin symlinks — MCP servers start instantly with no registry checks.
+
+</details>
+
+<details>
+<summary><strong>Internals: Volumes Reference</strong></summary>
 
 | Mount | Purpose |
 |-------|---------|
 | `/workspace` | Project source code |
 | `/root/.local/share/opencode` | OpenCode data, auth, database |
 | `/root/.config/opencode/memory` | MCP memory persistence |
-| `/root/.config/opencode/commands` | Custom slash commands (read-only) |
-| `/root/.config/opencode/skills` | Custom skills (read-only) |
-| `/root/.config/opencode/oh-my-opencode-slim.json` | oh-my-opencode plugin config (read-only) |
-| `/root/.agents/skills` | Agent skills (read-only) |
-| `/root/.ssh` | SSH keys for git (read-only) |
-| `/root/.gitconfig` | Git config (read-only) |
+| `/root/.config/opencode/commands` | Custom slash commands (ro) |
+| `/root/.config/opencode/skills` | Custom skills (ro) |
+| `/root/.config/opencode/oh-my-opencode-slim.json` | Plugin config (ro) |
+| `/root/.agents/skills` | Agent skills (ro) |
+| `/root/.ssh` | SSH keys for git (ro) |
+| `/root/.gitconfig` | Git config (ro) |
+| `/root/.git-credentials` | Git credentials (ro) |
 | `/var/run/docker.sock` | Docker socket for MCP containers |
-| `/certs/ca-bundle.pem` | CA certificate (read-only) |
+| `/certs/ca-bundle.pem` | CA certificate (ro) |
 
-## Resource Limits
+</details>
 
-Defined in `docker-compose.yml`:
-- **Memory limit**: 4 GB
-- **Memory reservation**: 1 GB
+<details>
+<summary><strong>Internals: Project Structure</strong></summary>
 
-## Healthcheck
-
-Each container runs a healthcheck every 30 seconds:
 ```
-curl -f http://localhost:${OPENCODE_PORT:-3000}/
-```
-- Interval: 30s
-- Timeout: 10s
-- Start period: 15s
-- Retries: 3
-
-## Gitignored Files
-
-These files are local-only and not committed:
-- `.env` — secrets
-- `docker-compose.override.yml` — personal repo services
-- `*.pem`, `ca-bundle.*` — certificates
-- `opencode.json`, `auth.json`, `opencode.db`, `memory.json` — runtime files
-
-## Troubleshooting
-
-### Container won't start
-```bash
-./opencode-web.sh logs opencode-docker
-# or
-docker compose logs opencode-docker
+├── Dockerfile                          # Multi-stage build
+├── docker-compose.yml                  # Base service definition
+├── docker-compose.override.yml.example # Template for your repos
+├── docker-compose.override.yml         # Your repo services (gitignored)
+├── .env.example / .env                 # Config template / your secrets (gitignored)
+├── entrypoint.sh                       # Container startup script
+├── opencode-web.sh                     # Host CLI wrapper
+├── opencode.json.template              # OpenCode config template
+├── prefill-proxy.mjs                   # LLM proxy (strips prefill)
+├── oh-my-opencode-slim.json.example    # Plugin preset template
+└── ca-bundle.pem                       # CA certificate (gitignored)
 ```
 
-### LLM API connection errors
-- Verify `LLM_BASE_URL` and `LLM_API_KEY` in `.env`
-- Check if the prefill proxy started: look for `✓ Prefill proxy running` in logs
-- If behind a corporate proxy, ensure `CA_CERT_PATH` points to a valid PEM file
-- Enable debug logging for full request/response details: set `PROXY_LOG_LEVEL=debug` in `.env`
+</details>
 
-### "This model does not support assistant message prefill"
-The prefill proxy should handle this automatically. If it fails to start, check logs for `✗ Prefill proxy failed to start`.
+<details>
+<summary><strong>Internals: Resource Limits & Healthcheck</strong></summary>
 
-### MCP Docker servers not working
-- Ensure Docker socket is mounted: look for `✓ Docker socket available` in startup logs
-- Pull the required image manually: `docker pull ghcr.io/github/github-mcp-server`
+- **Memory**: 4 GB limit / 1 GB reservation
+- **Healthcheck**: `curl -f http://localhost:${OPENCODE_PORT:-3000}/` every 30s (timeout 10s, start period 15s, 3 retries)
+- **Gitignored**: `.env`, `docker-compose.override.yml`, `*.pem`, `opencode.json`, `auth.json`, `opencode.db`, `memory.json`
 
-### Port conflict
-Change the port in `docker-compose.yml` or override:
-```yaml
-ports:
-  - "3001:3001"
-environment:
-  - OPENCODE_PORT=3001
-```
-
-### Shell into a running container
-```bash
-./opencode-web.sh shell opencode-docker
-```
+</details>

@@ -40,13 +40,15 @@ EOF
     echo "  ✓ Auth configured"
 fi
 
-# ─── Handle Zscaler/corporate CA certificates ─────────────────────
-if [ -f "/certs/zscaler.pem" ]; then
+# ─── Handle corporate CA certificates ──────────────────────────────
+# docker-compose mounts the host cert to /certs/ca-bundle.pem
+CA_CERT="/certs/ca-bundle.pem"
+if [ -f "${CA_CERT}" ] && [ "${CA_CERT}" != "/dev/null" ] && [ -s "${CA_CERT}" ]; then
     echo "→ Installing corporate CA certificate..."
-    cp /certs/zscaler.pem /usr/local/share/ca-certificates/zscaler.crt
+    cp "${CA_CERT}" /usr/local/share/ca-certificates/custom-ca.crt
     update-ca-certificates 2>/dev/null
-    export NODE_EXTRA_CA_CERTS="/certs/zscaler.pem"
-    export REQUESTS_CA_BUNDLE="/certs/zscaler.pem"
+    export NODE_EXTRA_CA_CERTS="${CA_CERT}"
+    export REQUESTS_CA_BUNDLE="${CA_CERT}"
     echo "  ✓ CA certificate installed"
 fi
 
