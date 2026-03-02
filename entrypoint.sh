@@ -95,6 +95,15 @@ export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="safe.directory"
 export GIT_CONFIG_VALUE_0="/workspace"
 
+# Validate .git-credentials mount
+GIT_CRED="/root/.git-credentials"
+if [ -d "${GIT_CRED}" ]; then
+    echo "  ⚠ ${GIT_CRED} is a directory (host file missing?) — HTTPS push credentials unavailable"
+    echo "    Set GIT_CREDENTIALS_PATH in .env to your credentials file, or leave unset to disable"
+elif [ -f "${GIT_CRED}" ] && [ -s "${GIT_CRED}" ]; then
+    echo "  ✓ Git credentials available (HTTPS push supported)"
+fi
+
 # ─── Expose /workspace under $HOME for "Open project" dialog ──────
 # The web UI searches $HOME for project directories. Inside Docker,
 # /root only has dotfiles which are filtered out, so the dialog is
