@@ -222,22 +222,34 @@ const server = http.createServer((req, res) => {
 
   /**
    * Chat completion path: buffer body → strip assistant messages → forward.
+   *
+   * Buffering is required to parse and modify the JSON body. Since the
+   * client is on localhost, the buffering cost is negligible (<1ms).
+   * The response path remains fully streaming (pipe).
    */
   const chunks = [];
   req.on("data", (chunk) => chunks.push(chunk));
   req.on("end", () => {
     let rawBody = Buffer.concat(chunks);
+    let modified = false;
 
     try {
       const body = JSON.parse(rawBody.toString());
       log.info(`[${id}] Chat completion: ${summariseRequest(body)}`);
-      const fixed = stripTrailingAssistantMessages(body, id);
-      rawBody = Buffer.from(JSON.stringify(fixed));
+
+      // Only re-serialize if we actually strip messages (avoids
+      // the JSON.stringify cost for requests that need no changes)
+      const msgs = body.messages;
+      if (msgs?.length && msgs[msgs.length - 1].role === "assistant") {
+        stripTrailingAssistantMessages(body, id);
+        rawBody = Buffer.from(JSON.stringify(body));
+        modified = true;
+      }
     } catch (e) {
       log.error(`[${id}] Failed to parse request body: ${e.message}`);
     }
 
-    fwdHeaders["content-length"] = rawBody.length;
+    if (modified) fwdHeaders["content-length"] = rawBody.length;
 
     const proxyReq = transport.request(
       targetUrl,
