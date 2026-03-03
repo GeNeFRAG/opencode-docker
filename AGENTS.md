@@ -7,11 +7,11 @@ OpenCode uses a multi-agent system where a central **orchestrator** delegates ta
 | Role | What it does | Default Model | Variant |
 |------|-------------|---------------|---------|
 | **orchestrator** | Top-level planning, tool use, delegation | `claude-opus-4-6` | — |
-| **oracle** | Deep reasoning, architecture, complex debugging | `claude-opus-4-6` | high |
-| **librarian** | Documentation lookup, library research | `claude-sonnet-4-6` | low |
-| **explorer** | Fast codebase search, file/symbol discovery | `claude-haiku-4-5` | low |
-| **designer** | UI/UX, styling, responsive layouts, visual polish | `claude-opus-4-6` | medium |
-| **fixer** | Targeted code fixes, implementation | `claude-sonnet-4-6` | low |
+| **oracle** | Deep reasoning, architecture, complex debugging | `claude-sonnet-4-6` | — |
+| **librarian** | Documentation lookup, library research | `gemini-2.5-pro` | — |
+| **explorer** | Fast codebase search, file/symbol discovery | `claude-sonnet-4-6` | — |
+| **designer** | UI/UX, styling, responsive layouts, visual polish | `gemini-2.5-pro` | — |
+| **fixer** | Targeted code fixes, implementation | `claude-sonnet-4-6` | — |
 
 **Variants** control quality/cost: `high` (max quality) · `medium` (balanced) · `low` (fast/cheap).
 
@@ -40,9 +40,9 @@ Each role only gets the MCP servers it needs:
 
 | Agent | MCP Servers |
 |-------|-------------|
-| **orchestrator** | `websearch`, `sequential-thinking`, `memory`, `time` |
+| **orchestrator** | `sequential-thinking`, `memory` |
 | **oracle** | `sequential-thinking` |
-| **librarian** | `websearch`, `context7` |
+| **librarian** | `websearch`, `context7`, `grep_app` |
 | **explorer** | *(none)* |
 | **designer** | *(none)* |
 | **fixer** | `memory` |
@@ -68,7 +68,7 @@ Browser automation for AI agents. Provides a CLI (`agent-browser`) for:
 
 ### simplify
 
-**Available to:** orchestrator (via `"skills": ["*"]`)
+**Available to:** orchestrator (via `"skills": ["*"]`) and fixer
 
 Post-editing code refinement. After writing code, this skill reviews and simplifies it for clarity without changing functionality:
 - Reduces nesting and complexity
@@ -82,6 +82,8 @@ Post-editing code refinement. After writing code, this skill reviews and simplif
 ### cartography
 
 **Available to:** orchestrator (via `"skills": ["*"]`)
+
+**Also used by:** oracle and explorer (via `"skills": ["cartography"]`)
 
 Repository mapping and understanding. Generates hierarchical codemaps for unfamiliar codebases:
 - Initialises with `cartographer.py init` — scans source files
@@ -144,12 +146,12 @@ Three presets ship in `oh-my-opencode-slim.json.example`:
 
 | Role | Model | Skills | MCPs |
 |------|-------|--------|------|
-| orchestrator | `claude-opus-4-6` | all | websearch, sequential-thinking, memory, time |
-| oracle | `claude-opus-4-6` (high) | — | sequential-thinking |
-| librarian | `claude-sonnet-4-6` (low) | — | websearch, context7 |
-| explorer | `claude-haiku-4-5` (low) | — | — |
-| designer | `claude-opus-4-6` (medium) | agent-browser | — |
-| fixer | `claude-sonnet-4-6` (low) | — | memory |
+| orchestrator | `claude-opus-4-6` | all | sequential-thinking, memory |
+| oracle | `claude-sonnet-4-6` | cartography | sequential-thinking |
+| librarian | `gemini-2.5-pro` | — | websearch, context7, grep_app |
+| explorer | `claude-sonnet-4-6` | cartography | — |
+| designer | `gemini-2.5-pro` | agent-browser | — |
+| fixer | `claude-sonnet-4-6` | simplify | memory |
 
 ### copilot — GitHub Copilot
 
@@ -172,12 +174,12 @@ When a primary model is unavailable or exceeds `timeoutMs` (default 15s), models
 
 | Role | Fallback sequence |
 |------|------------------|
-| orchestrator | Sonnet 4.6 → Sonnet 4.5 → GPT-5 → DeepSeek V3 |
-| oracle | o3 → Sonnet 4.6 → DeepSeek R1 → GPT-5 |
-| designer | Sonnet 4.6 → Opus 4.5 → Llama 4 Maverick → GPT-5 |
-| explorer | Haiku 4.5 → GPT-4.1 Mini |
-| librarian | Sonnet 4.5 → Llama 4 Scout → GPT-5 Mini |
-| fixer | Sonnet 4.5 → GPT-5 Codex → DeepSeek R1 |
+| orchestrator | claude-opus-4-5 → gemini-2.5-pro |
+| oracle | claude-sonnet-4-5 → gemini-2.5-pro |
+| designer | claude-sonnet-4-5 → gemini-2.5-pro |
+| explorer | claude-sonnet-4-5 → gemini-2.5-pro |
+| librarian | claude-sonnet-4-5 → gemini-2.5-pro |
+| fixer | claude-sonnet-4-5 → gemini-2.5-pro |
 
 Disable with `"fallback": { "enabled": false }` in the plugin config.
 

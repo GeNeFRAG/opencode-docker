@@ -317,7 +317,9 @@ if [ "${OPENCODE_MODE}" = "tui" ]; then
     # ── TUI mode: run opencode (terminal UI) inside ttyd ─────────
     # ttyd wraps the opencode TUI in a full xterm.js session and
     # serves it over WebSocket on OPENCODE_PORT — open in any browser.
-    # The prefill proxy is not used in TUI mode (no HTTP API path).
+    # Reconnect is enabled by default in ttyd's xterm.js client — no flag needed.
+    # The prefill proxy runs in both modes — opencode reads opencode.json
+    # which points at 127.0.0.1:18080 regardless of web vs TUI.
     echo "→ Starting opencode TUI via ttyd on 0.0.0.0:${OPENCODE_PORT:-3000}..."
     echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
     echo ""
@@ -334,6 +336,12 @@ if [ "${OPENCODE_MODE}" = "tui" ]; then
         echo ""
         echo "  ⟳ ttyd exited ($(date)). Restarting in 3s..."
         echo ""
+
+        # ── Proxy liveness check ───────────────────────────────────────
+        # Same as web mode — opencode routes LLM traffic through the proxy
+        # in both modes, so restart it if it died while ttyd was running.
+        _restart_proxy
+
         sleep 3
     done
 

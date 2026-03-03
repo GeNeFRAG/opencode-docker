@@ -263,7 +263,7 @@ When a container starts, `entrypoint.sh` runs these steps:
 6. **Docker socket check** — Verifies `/var/run/docker.sock` for MCP containers
 7. **Git safe.directory** — Exports `GIT_CONFIG_*` env vars to mark `/workspace` as safe
 8. **Workspace symlink** — Symlinks `/workspace` into `$HOME` so the web UI "Open project" dialog can discover it
-9. **Prefill proxy** — Launches `prefill-proxy.mjs` on `127.0.0.1:18080` (if `PREFILL_PROXY=true` and `OPENCODE_MODE=web`, the default)
+9. **Prefill proxy** — Launches `prefill-proxy.mjs` on `127.0.0.1:18080` (if `PREFILL_PROXY=true`, the default). Used in both `web` and `tui` modes — opencode reads `opencode.json` which routes LLM traffic through the proxy regardless of mode
 10. **Auto-update cron** — Installs a 12-hourly cron job (update or notify-only, per `OPENCODE_AUTOUPDATE`)
 11. **Mode selection** — Reads `OPENCODE_MODE` (default `web`):
     - `web` — starts `opencode web` in a restart loop on `0.0.0.0:${OPENCODE_PORT:-3000}`

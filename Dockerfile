@@ -115,6 +115,6 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # EXPOSE is omitted — each compose service maps its own port.
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:${OPENCODE_PORT:-3000}/ || exit 1
+    CMD curl -fsS -o /dev/null http://localhost:${OPENCODE_PORT:-3000}/ || exit 1
 
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
