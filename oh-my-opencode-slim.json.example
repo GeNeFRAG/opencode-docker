@@ -34,8 +34,7 @@
           "cartography"
         ],
         "mcps": [
-          "sequential-thinking",
-          "kubernetes"
+          "sequential-thinking"
         ]
       },
       "designer": {
@@ -43,9 +42,7 @@
         "skills": [
           "agent-browser"
         ],
-        "mcps": [
-          "playwright"
-        ]
+        "mcps": []
       },
       "explorer": {
         "model": "llm/claude-sonnet-4-6",
@@ -70,8 +67,7 @@
           "simplify"
         ],
         "mcps": [
-          "memory",
-          "kubernetes"
+          "memory"
         ]
       }
     }
@@ -83,27 +79,27 @@
     "chains": {
       "orchestrator": [
         "llm/claude-opus-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ],
       "oracle": [
         "llm/claude-sonnet-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ],
       "designer": [
         "llm/claude-sonnet-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ],
       "explorer": [
         "llm/claude-sonnet-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ],
       "librarian": [
         "llm/claude-sonnet-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ],
       "fixer": [
         "llm/claude-sonnet-4-5",
-        "github-copilot/claude-sonnet-4-6"
+        "github-copilot/gemini-2.5-pro"
       ]
     }
   }
