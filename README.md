@@ -303,7 +303,6 @@ Multi-stage build for minimal image size:
 | `/workspace` | Project source code |
 | `/root/.local/share/opencode` | OpenCode data, auth, database |
 | `/root/.config/opencode/memory` | MCP memory persistence |
-| `/root/.config/opencode/commands` | Custom slash commands (ro) |
 | `/root/.config/opencode/skills` | Custom skills (ro) |
 | `/root/.config/opencode/oh-my-opencode-slim.json` | Plugin config (ro) |
 | `/root/.agents/skills` | Agent skills (ro) |

@@ -35,7 +35,6 @@ services:
       - ${REPOS_PATH:-~/repos}/my-project:/workspace
       - opencode-data-my-project:/root/.local/share/opencode
       - opencode-memory-my-project:/root/.config/opencode/memory
-      - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
       - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
       - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
       - ${HOME}/.agents/skills:/root/.agents/skills:ro
@@ -72,7 +71,6 @@ services:
   #     - ${REPOS_PATH:-~/repos}/another-project:/workspace
   #     - opencode-data-another:/root/.local/share/opencode
   #     - opencode-memory-another:/root/.config/opencode/memory
-  #     - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
   #     - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
   #     - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
   #     - ${HOME}/.agents/skills:/root/.agents/skills:ro

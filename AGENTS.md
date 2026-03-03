@@ -183,20 +183,6 @@ When a primary model is unavailable or exceeds `timeoutMs` (default 15s), models
 
 Disable with `"fallback": { "enabled": false }` in the plugin config.
 
-## Custom Commands
-
-62+ slash commands are mounted from `~/.config/opencode/commands/` into the container. These provide specialised agent personas and workflows:
-
-| Category | Examples | Count |
-|----------|----------|-------|
-| **Agent personas** | `/bmad-agent-bmm-dev`, `/bmad-agent-bmm-architect`, `/bmad-agent-bmm-qa` | 13 |
-| **Builder tools** | `/bmad-bmb-create-agent`, `/bmad-bmb-create-workflow`, `/bmad-bmb-validate-*` | 12 |
-| **Project management** | `/bmad-bmm-create-prd`, `/bmad-bmm-sprint-planning`, `/bmad-bmm-code-review` | 23+ |
-| **Creative workshops** | `/bmad-brainstorming`, `/bmad-cis-design-thinking`, `/bmad-cis-problem-solving` | 5+ |
-| **Utilities** | `/bmad-help`, `/bmad-shard-doc`, `/bmad-editorial-review-*` | 7+ |
-
-Commands load agent personas from `@_bmad/` reference files and present interactive menus.
-
 ## Customisation
 
 Edit `~/.config/opencode/oh-my-opencode-slim.json` on the host. Changes take effect on next container start.

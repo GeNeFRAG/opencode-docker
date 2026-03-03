@@ -18,4 +18,5 @@ memory.json
 .DS_Store
 
 _bmad*
+.opencode
 logs

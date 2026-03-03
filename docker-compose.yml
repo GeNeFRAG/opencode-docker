@@ -20,8 +20,7 @@ x-opencode-common: &opencode-common
     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
     - OPENCODE_ENABLE_EXPERIMENTAL_MODELS=1
   volumes: &opencode-volumes
-    # ─── OpenCode config (commands, skills, plugins) ───────────
-    - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
+    # ─── OpenCode config (skills, plugins) ────────────────────
     - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
     - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
     # ─── Agent skills ─────────────────────────────────────────
@@ -81,7 +80,6 @@ services:
       - opencode-data-self:/root/.local/share/opencode
       - opencode-memory-self:/root/.config/opencode/memory
       # Inherit shared mounts
-      - ${HOME}/.config/opencode/commands:/root/.config/opencode/commands:ro
       - ${HOME}/.config/opencode/skills:/root/.config/opencode/skills:ro
       - ${HOME}/.config/opencode/oh-my-opencode-slim.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
       - ${HOME}/.agents/skills:/root/.agents/skills:ro

@@ -99,7 +99,6 @@ RUN ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/o
 # ─── Workspace and data directories ───────────────────────────────
 RUN mkdir -p /workspace \
     /root/.local/share/opencode \
-    /root/.config/opencode/commands \
     /root/.config/opencode/skills \
     /root/.agents/skills
 
