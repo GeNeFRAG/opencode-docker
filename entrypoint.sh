@@ -172,6 +172,11 @@ if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
 
     if kill -0 "${PROXY_PID}" 2>/dev/null; then
         echo "  ✓ Prefill proxy running (PID ${PROXY_PID})"
+        # Warm up TLS — establish the keep-alive connection to upstream now so
+        # the first real user request doesn't pay the TCP+TLS handshake cost.
+        curl -s -o /dev/null -w "  ✓ TLS connection warmed up (%{time_connect}s tcp, %{time_appconnect}s tls)\n" \
+            -H "Authorization: Bearer ${LLM_API_KEY}" \
+            "http://127.0.0.1:18080/models" 2>/dev/null || true
     else
         echo "  ✗ Prefill proxy failed to start — falling back to direct connection"
         # Re-generate config to point directly at the upstream URL

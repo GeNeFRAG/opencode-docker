@@ -57,6 +57,15 @@ services:
   opencode-docker:
     <<: *opencode-common
     container_name: opencode-self
+    # ── Network mode ───────────────────────────────────────────────
+    # Set DOCKER_NETWORK_MODE=host in .env to bypass the Docker bridge
+    # NAT and connect directly via the host's network stack.
+    # This eliminates ~70-80ms TCP overhead per new upstream connection
+    # and is the recommended setting on Linux when low latency matters.
+    # Note: host networking is Linux-only (ignored on Docker Desktop).
+    # With host mode, port mapping below is ignored — the container
+    # binds directly to the host port set by OPENCODE_PORT.
+    network_mode: ${DOCKER_NETWORK_MODE:-bridge}
     ports:
       - "3000:3000"
     healthcheck:
