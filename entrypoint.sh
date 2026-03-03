@@ -225,7 +225,8 @@ echo "${LOG_PREFIX} │  ⬆  Updating opencode-ai: ${CURRENT} → ${LATEST}"
 echo "${LOG_PREFIX} ╰───────────────────────────────────────────────╯"
 
 # Install the new version globally (overwrites existing binary in-place)
-if npm install -g "opencode-ai@${LATEST}" --prefer-online 2>&1 | sed "s/^/${LOG_PREFIX}   /"; then
+if npm install -g "opencode-ai@${LATEST}" \
+        --prefer-online --no-fund --no-audit --loglevel=error; then
     NEW_VER=$(opencode --version 2>/dev/null || echo "unknown")
     echo "${LOG_PREFIX} ✓ Installed opencode-ai ${NEW_VER}"
 else
@@ -302,5 +303,25 @@ while true; do
     echo ""
     echo "  ⟳ opencode web exited ($(date)). Restarting in 3s..."
     echo ""
+
+    # ── Proxy liveness check ───────────────────────────────────────
+    # The prefill proxy is a long-lived background process. If it died
+    # (crash, OOM, etc.) while opencode was running, restart it now so
+    # the next opencode web launch can reach 127.0.0.1:18080.
+    if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
+        if ! kill -0 "${PROXY_PID:-0}" 2>/dev/null; then
+            echo "  ⟳ Prefill proxy not running — restarting..."
+            UPSTREAM_URL="${LLM_BASE_URL}" PROXY_PORT=18080 \
+                node /opt/opencode/prefill-proxy.mjs &
+            PROXY_PID=$!
+            sleep 1
+            if kill -0 "${PROXY_PID}" 2>/dev/null; then
+                echo "  ✓ Prefill proxy restarted (PID ${PROXY_PID})"
+            else
+                echo "  ✗ Prefill proxy failed to restart — continuing without proxy"
+            fi
+        fi
+    fi
+
     sleep 3
 done
