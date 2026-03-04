@@ -187,110 +187,6 @@ if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
 else
     echo "→ Prefill proxy disabled — connecting directly to ${LLM_BASE_URL}"
 fi
-
-# ─── Cron-based auto-update (every 12h) ───────────────────────────
-AUTO_UPDATE_SCRIPT="/usr/local/bin/opencode-auto-update.sh"
-cat > "${AUTO_UPDATE_SCRIPT}" <<'SCRIPT'
-#!/bin/bash
-# Auto-update opencode-ai if a newer version is available.
-# Sessions are persisted on disk — the web UI reconnects after restart.
-set -e
-
-LOG_PREFIX="[opencode-auto-update]"
-LOCKFILE="/tmp/opencode-update.lock"
-
-# Prevent concurrent runs
-exec 9>"${LOCKFILE}"
-if ! flock -n 9; then
-    echo "${LOG_PREFIX} Another update is already running, skipping."
-    exit 0
-fi
-
-LATEST=$(npm view opencode-ai version 2>/dev/null || echo "unknown")
-CURRENT=$(opencode --version 2>/dev/null || echo "unknown")
-
-if [ "$LATEST" = "unknown" ] || [ "$CURRENT" = "unknown" ]; then
-    echo "${LOG_PREFIX} Could not determine versions (current=${CURRENT}, latest=${LATEST}). Skipping."
-    exit 0
-fi
-
-if [ "$LATEST" = "$CURRENT" ]; then
-    echo "${LOG_PREFIX} Already on latest version (${CURRENT}). No update needed."
-    exit 0
-fi
-
-echo ""
-echo "${LOG_PREFIX} ╭───────────────────────────────────────────────╮"
-echo "${LOG_PREFIX} │  ⬆  Updating opencode-ai: ${CURRENT} → ${LATEST}"
-echo "${LOG_PREFIX} ╰───────────────────────────────────────────────╯"
-
-# Install the new version globally (overwrites existing binary in-place)
-if npm install -g "opencode-ai@${LATEST}" \
-        --prefer-online --no-fund --no-audit --loglevel=error; then
-    NEW_VER=$(opencode --version 2>/dev/null || echo "unknown")
-    echo "${LOG_PREFIX} ✓ Installed opencode-ai ${NEW_VER}"
-else
-    echo "${LOG_PREFIX} ✗ npm install failed — keeping current version ${CURRENT}"
-    exit 1
-fi
-
-# Re-create the symlink (in case the binary path shifted)
-ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode
-
-# Restart opencode — tini is PID 1 and entrypoint runs a restart loop,
-# so killing the opencode process causes the loop to relaunch it automatically.
-# In tmux mode, opencode runs inside a tmux session with its own restart loop.
-OPENCODE_PID=$(pgrep -f "opencode web" | head -1 || true)
-if [ -z "${OPENCODE_PID}" ]; then
-    # TUI or tmux mode: opencode runs without "web" flag
-    OPENCODE_PID=$(pgrep -x "opencode" | head -1 || true)
-fi
-if [ -n "${OPENCODE_PID}" ]; then
-    echo "${LOG_PREFIX} Restarting opencode (PID ${OPENCODE_PID})..."
-    kill -TERM "${OPENCODE_PID}" 2>/dev/null || true
-    sleep 5
-    if pgrep -f "opencode" > /dev/null; then
-        echo "${LOG_PREFIX} ✓ opencode restarted with v${LATEST}"
-    else
-        echo "${LOG_PREFIX} ⟳ Waiting for restart loop to relaunch..."
-    fi
-else
-    echo "${LOG_PREFIX} opencode not running — update will take effect on next start."
-fi
-
-echo ""
-SCRIPT
-chmod +x "${AUTO_UPDATE_SCRIPT}"
-
-# Install cron job (every 12h) — output goes to container stdout (PID 1)
-AUTOUPDATE_ENABLED="${OPENCODE_AUTOUPDATE:-true}"
-if [ "${AUTOUPDATE_ENABLED}" = "true" ]; then
-    echo "0 */12 * * * ${AUTO_UPDATE_SCRIPT} > /proc/1/fd/1 2>&1" | crontab -
-    cron
-    echo "  ✓ Auto-update cron installed (every 12h)"
-else
-    # Fall back to notification-only
-    VERSION_CHECK_SCRIPT="/usr/local/bin/opencode-version-check.sh"
-    cat > "${VERSION_CHECK_SCRIPT}" <<'VSCRIPT'
-#!/bin/bash
-LATEST=$(npm view opencode-ai version 2>/dev/null || echo "unknown")
-CURRENT=$(opencode --version 2>/dev/null || echo "unknown")
-if [ "$LATEST" != "unknown" ] && [ "$CURRENT" != "unknown" ] && [ "$LATEST" != "$CURRENT" ]; then
-    echo ""
-    echo "  ╭───────────────────────────────────────────────╮"
-    echo "  │  ⬆  opencode-ai update available:             │"
-    echo "  │     ${CURRENT} → ${LATEST}$(printf '%*s' $((30 - ${#CURRENT} - ${#LATEST})) '')│"
-    echo "  │     Run: ./opencode-web.sh update              │"
-    echo "  ╰───────────────────────────────────────────────╯"
-    echo ""
-fi
-VSCRIPT
-    chmod +x "${VERSION_CHECK_SCRIPT}"
-    echo "0 */12 * * * ${VERSION_CHECK_SCRIPT} > /proc/1/fd/1 2>&1" | crontab -
-    cron
-    echo "  ✓ Version check cron installed (every 12h, notify only)"
-fi
-
 echo ""
 
 # ─── Mode selection ───────────────────────────────────────────────
@@ -327,7 +223,7 @@ if [ "${OPENCODE_MODE}" = "tmux" ]; then
     # - tmux provides: pane splitting, persistent scrollback, session
     #   persistence across browser disconnects, and `docker exec` attach
     # - ttyd serves the tmux session over WebSocket on OPENCODE_PORT
-    # - opencode runs inside tmux in a restart loop (auto-update safe)
+    # - opencode runs inside tmux in a restart loop
     # - The prefill proxy runs in all modes — opencode reads opencode.json
     #   which points at 127.0.0.1:18080 regardless of mode.
 
@@ -412,8 +308,6 @@ else
     echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
     echo ""
 
-    # tini is PID 1; this loop lets the auto-update cron kill and restart
-    # the opencode process without stopping the container.
     while true; do
         opencode web \
             --hostname 0.0.0.0 \

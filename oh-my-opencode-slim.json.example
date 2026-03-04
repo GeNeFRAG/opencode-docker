@@ -1,8 +1,8 @@
 {
   "_comment": [
     "oh-my-opencode-slim — Agent preset and fallback configuration",
-    "Copy to ~/.config/opencode/oh-my-opencode-slim.json",
-    "This file is mounted read-only into containers via docker-compose.",
+    "Baked into the Docker image at build time (see Dockerfile).",
+    "To override: mount your own file to /root/.config/opencode/oh-my-opencode-slim.json",
     "",
     "Presets define which model, variant, skills, and MCP servers each agent uses.",
     "Set 'preset' to the name of the active preset (e.g. 'default', 'copilot').",

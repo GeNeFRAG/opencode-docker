@@ -110,7 +110,6 @@ Set these three in `.env`:
 | `OPENCODE_PORT` | Web UI / TUI port (default: `3000`) |
 | `OPENCODE_MODE` | `web` (default) — browser web UI · `tui` — terminal UI via ttyd · `tmux` — terminal UI via tmux + ttyd |
 | `OPENCODE_VERSION` | Pin opencode-ai version for builds (default: `latest`) |
-| `OPENCODE_AUTOUPDATE` | Enable in-container auto-updates every 12h (default: `true`). Set `false` for notify-only. |
 | `OPENCODE_EXTRA_ARGS` | Extra arguments passed to `opencode web` or `opencode` (TUI/tmux mode) |
 | `OPENCODE_TUI_ARGS` | Extra arguments passed to `ttyd` when `OPENCODE_MODE=tui` or `tmux` |
 | `REPOS_PATH` | Host path to repos (default: `~/repos`) |
@@ -173,11 +172,15 @@ Enabled servers run as Node processes inside the container. Docker-based servers
 
 Controls which models, skills, MCP servers, and fallback chains each agent role uses.
 
-```bash
-cp oh-my-opencode-slim.json.example ~/.config/opencode/oh-my-opencode-slim.json
-```
+The plugin npm package and its default config (`oh-my-opencode-slim.json.example`) are both baked into the Docker image at build time — no host-side installation or mount is needed.
 
-The file is mounted read-only into containers and loaded by `@opencode-ai/plugin` at startup.
+To override the defaults, mount your own config file:
+
+```yaml
+# docker-compose.override.yml
+volumes:
+  - ./my-slim-config.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
+```
 
 ### Presets
 
@@ -279,14 +282,11 @@ services:
 | TUI: attach to tmux from host | `docker exec -it <container> tmux attach -t opencode` |
 | TUI: custom tmux config | Mount to `/root/.config/opencode/tmux.conf:ro` — applied at startup |
 
-## Auto-Update
+## Updating
 
-Containers automatically check for new `opencode-ai` releases every 12 hours.
+Packages are installed at Docker image build time only — there are no in-container auto-updates.
 
-- **Enabled by default** — set `OPENCODE_AUTOUPDATE=false` in `.env` to disable
-- When enabled: installs the new version quietly (`--loglevel=error`) and restarts `opencode web` in-place (sessions persist on disk — the web UI reconnects)
-- When disabled: logs a notification about the available update but doesn't install it
-- **Manual update**: `./opencode-web.sh update [service]` rebuilds the image with the latest version
+- **Update to latest**: `./opencode-web.sh update [service]` — rebuilds the image with the latest `opencode-ai`
 - **Check version**: `./opencode-web.sh version [service]`
 - **Pin version**: Set `OPENCODE_VERSION=1.2.15` in `.env` to lock the build to a specific release
 
@@ -306,8 +306,7 @@ When a container starts, `entrypoint.sh` runs these steps:
 7. **Git safe.directory** — Exports `GIT_CONFIG_*` env vars to mark `/workspace` as safe
 8. **Workspace symlink** — Symlinks `/workspace` into `$HOME` so the web UI "Open project" dialog can discover it
 9. **Prefill proxy** — Launches `prefill-proxy.mjs` on `127.0.0.1:18080` (if `PREFILL_PROXY=true`, the default). Used in all modes — opencode reads `opencode.json` which routes LLM traffic through the proxy regardless of mode
-10. **Auto-update cron** — Installs a 12-hourly cron job (update or notify-only, per `OPENCODE_AUTOUPDATE`)
-11. **Mode selection** — Reads `OPENCODE_MODE` (default `web`):
+10. **Mode selection** — Reads `OPENCODE_MODE` (default `web`):
     - `web` — starts `opencode web` in a restart loop on `0.0.0.0:${OPENCODE_PORT:-3000}`
     - `tui` — starts `ttyd` serving the opencode TUI directly in a restart loop on the same port
     - `tmux` — creates a tmux session (`opencode`) running the TUI in a restart loop, then starts `ttyd` serving `tmux attach` on the same port. Browser opens a full xterm.js terminal with tmux; `docker exec` can also attach to the same session.
@@ -334,7 +333,7 @@ Multi-stage build for minimal image size:
 
 **Builder stage** — `node:22-bookworm-slim` with build tools. Installs `opencode-ai` (version set by `OPENCODE_VERSION` build arg, default `latest`), provider SDKs (`@ai-sdk/openai-compatible`, `@ai-sdk/groq`, `@openrouter/ai-sdk-provider`), and MCP servers globally.
 
-**Runtime stage** — `node:22-bookworm-slim` (no build tools). Adds `git`, `curl`, `jq`, `ripgrep`, `openssh-client`, `unzip`, `cron`, `tini` (PID 1), `tmux` (terminal multiplexer for tmux mode), Docker CLI, Bun, `python3` (required by the cartography skill), and `ttyd` (web terminal for `OPENCODE_MODE=tui` and `tmux`). Copies `node_modules` from builder and re-creates bin symlinks — MCP servers start instantly with no registry checks.
+**Runtime stage** — `node:22-bookworm-slim` (no build tools). Adds `git`, `curl`, `jq`, `ripgrep`, `openssh-client`, `unzip`, `tini` (PID 1), `tmux` (terminal multiplexer for tmux mode), Docker CLI, Bun, `python3` (required by the cartography skill), and `ttyd` (web terminal for `OPENCODE_MODE=tui` and `tmux`). Copies `node_modules` from builder and re-creates bin symlinks — MCP servers start instantly with no registry checks.
 
 </details>
 
@@ -346,9 +345,6 @@ Multi-stage build for minimal image size:
 | `/workspace` | Project source code |
 | `/root/.local/share/opencode` | OpenCode data, auth, database |
 | `/root/.config/opencode/memory` | MCP memory persistence |
-| `/root/.config/opencode/skills` | Custom skills (ro) |
-| `/root/.config/opencode/oh-my-opencode-slim.json` | Plugin config (ro) |
-| `/root/.agents/skills` | Agent skills (ro) |
 | `/root/.ssh` | SSH keys for git (ro) |
 | `/root/.gitconfig` | Git config (ro) |
 | `/root/.git-credentials` | Git credentials (ro) |
@@ -371,7 +367,7 @@ Multi-stage build for minimal image size:
 ├── opencode.json.template              # OpenCode config template
 ├── tmux.conf                           # tmux configuration (TUI mode)
 ├── prefill-proxy.mjs                   # LLM proxy (strips prefill)
-├── oh-my-opencode-slim.json.example    # Plugin preset template
+├── oh-my-opencode-slim.json.example    # Plugin preset config (baked into image at build)
 └── ca-bundle.pem                       # CA certificate (gitignored)
 ```
 

@@ -185,7 +185,7 @@ Disable with `"fallback": { "enabled": false }` in the plugin config.
 
 ## Customisation
 
-Edit `~/.config/opencode/oh-my-opencode-slim.json` on the host. Changes take effect on next container start.
+Edit `/root/.config/opencode/oh-my-opencode-slim.json` inside the container (or mount your own via docker-compose override). Changes take effect on next container start.
 
 - **Switch preset:** Change `"preset": "budget"`
 - **Swap a model:** Replace any `"model"` value (e.g. use GPT-5 for orchestrator)
@@ -193,3 +193,7 @@ Edit `~/.config/opencode/oh-my-opencode-slim.json` on the host. Changes take eff
 - **Grant skills:** Set `"skills": ["agent-browser"]` or `["*"]` for all
 - **Disable fallback:** Set `"fallback": { "enabled": false }`
 - **New preset:** Add a key under `"presets"` and set `"preset"` to its name
+- **Override without rebuild:** Mount a custom file in docker-compose.override.yml:
+  ```yaml
+  - ./my-slim-config.json:/root/.config/opencode/oh-my-opencode-slim.json:ro
+  ```
