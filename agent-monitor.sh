@@ -11,8 +11,14 @@
 
 POLL_INTERVAL=2  # seconds between DB polls
 # Number of consecutive stable polls before marking done.
-# With POLL_INTERVAL=2, this means 3*2=6s of no new messages → done.
-STABLE_THRESHOLD=3
+# With POLL_INTERVAL=2, this means 5×2=10s of no new messages → done.
+# This must be generous enough for agents that pause while "thinking"
+# (e.g. oracle can pause 10-20s between messages).
+STABLE_THRESHOLD=5
+
+# Seconds of quiet that tells us a session is "definitely done" during
+# the initial seed phase (matches the status-bar threshold in agent-status.sh).
+SEED_ACTIVE_THRESHOLD_S=15
 
 # ─── Colors ───────────────────────────────────────────────────────
 RESET="\033[0m"
@@ -43,7 +49,7 @@ _agent_color() {
 _fmt_time() {
     local ms="$1"
     local secs=$(( ms / 1000 ))
-    TZ="${AGENT_MONITOR_TZ:-${TZ:-UTC}}" date -d "@${secs}" '+%H:%M:%S' 2>/dev/null || echo "??:??:??"
+    date -d "@${secs}" '+%H:%M:%S' 2>/dev/null || echo "??:??:??"
 }
 
 # ─── Format duration in ms to human-readable ─────────────────────
@@ -74,20 +80,39 @@ _print_header() {
 # ─── Query subagent sessions from the DB ──────────────────────────
 # Returns TSV: session_id  agent  model  time_created  msg_count  last_msg_time
 # Only considers sessions from the current container lifecycle.
+# Uses a single aggregation query (no correlated subqueries) for speed.
 _query_subagents() {
     local startup_ts
     startup_ts=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
     opencode db "
         SELECT
             s.id,
-            COALESCE(json_extract(m.data, '\$.agent'), 'unknown') as agent,
-            COALESCE(json_extract(m.data, '\$.model.modelID'), '?') as model,
+            COALESCE(first_msg.agent, 'unknown') as agent,
+            COALESCE(first_msg.model, '?') as model,
             s.time_created,
-            (SELECT COUNT(*) FROM message WHERE session_id = s.id) as msg_count,
-            (SELECT COALESCE(MAX(time_created), s.time_created) FROM message WHERE session_id = s.id) as last_msg_time
+            COALESCE(agg.msg_count, 0) as msg_count,
+            COALESCE(agg.last_msg_time, s.time_created) as last_msg_time
         FROM session s
-        LEFT JOIN message m ON m.session_id = s.id
-            AND m.rowid = (SELECT MIN(rowid) FROM message WHERE session_id = s.id)
+        LEFT JOIN (
+            SELECT
+                m.session_id,
+                json_extract(m.data, '\$.agent') as agent,
+                json_extract(m.data, '\$.model.modelID') as model
+            FROM message m
+            INNER JOIN (
+                SELECT session_id, MIN(rowid) as min_rowid
+                FROM message
+                GROUP BY session_id
+            ) fm ON m.session_id = fm.session_id AND m.rowid = fm.min_rowid
+        ) first_msg ON first_msg.session_id = s.id
+        LEFT JOIN (
+            SELECT
+                session_id,
+                COUNT(*) as msg_count,
+                MAX(time_created) as last_msg_time
+            FROM message
+            GROUP BY session_id
+        ) agg ON agg.session_id = s.id
         WHERE s.parent_id IS NOT NULL
           AND s.time_created >= ${startup_ts}
         ORDER BY s.time_created ASC
@@ -111,7 +136,9 @@ _query_tokens() {
 
 # ─── Format token count to human-readable (e.g. 1.2k, 45.3k) ────
 _fmt_tokens() {
-    local n="$1"
+    local n="${1:-0}"
+    # Guard against non-numeric values
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
     if [ "$n" -ge 1000000 ]; then
         local m=$(( n / 1000 ))
         echo "$(( m / 1000 )).$(( (m % 1000) / 100 ))M"
@@ -122,8 +149,38 @@ _fmt_tokens() {
     fi
 }
 
+# ─── Print a "done" line for a session ────────────────────────────
+_print_done() {
+    local sid="$1" agent="$2" tcreated="$3" last_msg_time="$4"
+    local color
+    color=$(_agent_color "$agent")
+    local duration=$(( last_msg_time - tcreated ))
+    local dur_str
+    dur_str=$(_fmt_duration "$duration")
+    local ts
+    ts=$(_fmt_time "$last_msg_time")
+    # Fetch token usage
+    local token_line tok_in tok_out tok_cache token_str=""
+    token_line=$(_query_tokens "$sid")
+    if [ -n "$token_line" ]; then
+        IFS=$'\t' read -r tok_in tok_out tok_cache <<< "$token_line"
+        token_str="  ${DIM}in:$(_fmt_tokens "$tok_in") out:$(_fmt_tokens "$tok_out") cache:$(_fmt_tokens "$tok_cache")${RESET}"
+    fi
+    echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}done${RESET}  ${GRAY}${dur_str}${RESET}${token_str}  ${DIM}${ts}${RESET}"
+}
+
+# ─── Parse a tracked session record ──────────────────────────────
+# Format: agent|model|time_created|status|msg_count|last_msg_time|stable_count
+_parse_session() {
+    local entry="$1"
+    IFS='|' read -r _s_agent _s_model _s_tcreated _s_status _s_msg_count _s_last_msg _s_stable <<< "$entry"
+}
+
 # ─── Main monitor loop ────────────────────────────────────────────
 main() {
+    # Ensure TZ defaults to UTC if not set
+    export TZ="${TZ:-UTC}"
+
     _print_header
 
     # ── Wait for DB readiness ────────────────────────────────────
@@ -147,54 +204,66 @@ main() {
     # key=session_id, value="agent|model|time_created|status|msg_count|last_msg_time|stable_count"
     declare -A known_sessions
 
-    # ── Seed: replay recent sessions, suppress old ones ──────────
-    # Sessions from the last REPLAY_WINDOW are shown immediately so
-    # you see recent activity even if you open the monitor late.
+    # ── Seed: replay recent sessions, detect currently-active ones ─
+    # Sessions from the last REPLAY_WINDOW are shown.
+    # CRITICAL FIX: sessions with recent message activity are seeded as
+    # "active" so the poll loop continues to track them. Previously all
+    # seeds were marked "done", causing running agents to appear finished.
     local REPLAY_WINDOW_MS=300000  # 5 minutes
     local now_ms
     now_ms=$(date +%s%3N 2>/dev/null || echo "0")
     local replay_cutoff=$(( now_ms - REPLAY_WINDOW_MS ))
+    local active_cutoff_ms=$(( SEED_ACTIVE_THRESHOLD_S * 1000 ))
 
-    local seed_data old_count=0 replay_count=0
+    local seed_data old_count=0 replay_count=0 active_count=0
     seed_data=$(_query_subagents)
     while IFS=$'\t' read -r sid agent model tcreated msg_count last_msg_time; do
         [ -z "$sid" ] && continue
 
-        if [ "$tcreated" -lt "$replay_cutoff" ]; then
-            # Old session — suppress silently
+        local age_ms=$(( now_ms - last_msg_time ))
+
+        if [ "$tcreated" -lt "$replay_cutoff" ] && [ "$age_ms" -ge "$active_cutoff_ms" ]; then
+            # Old session, no recent activity — suppress silently
             known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
             old_count=$(( old_count + 1 ))
-        else
-            # Recent session — replay it as a visible completed event
-            known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
-            replay_count=$(( replay_count + 1 ))
+
+        elif [ "$age_ms" -lt "$active_cutoff_ms" ]; then
+            # Recent message activity — this agent may still be running!
+            known_sessions["$sid"]="${agent}|${model}|${tcreated}|active|${msg_count}|${last_msg_time}|0"
+            active_count=$(( active_count + 1 ))
             local color
             color=$(_agent_color "$agent")
-            local duration=$(( last_msg_time - tcreated ))
-            local dur_str
-            dur_str=$(_fmt_duration "$duration")
             local ts
-            ts=$(_fmt_time "$last_msg_time")
-            # Fetch token usage
-            local token_line tok_in tok_out tok_cache token_str=""
-            token_line=$(_query_tokens "$sid")
-            if [ -n "$token_line" ]; then
-                IFS=$'\t' read -r tok_in tok_out tok_cache <<< "$token_line"
-                token_str="  ${DIM}in:$(_fmt_tokens "$tok_in") out:$(_fmt_tokens "$tok_out") cache:$(_fmt_tokens "$tok_cache")${RESET}"
-            fi
-            echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}done${RESET}  ${GRAY}${dur_str}${RESET}${token_str}  ${DIM}${ts}${RESET}"
+            ts=$(_fmt_time "$tcreated")
+            echo -e "  ${color}▶${RESET} ${BOLD}${agent}${RESET} ${DIM}active${RESET}  ${GRAY}${model}${RESET}  ${DIM}${ts}${RESET}"
+
+        else
+            # Recent session that's finished — replay as done
+            known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
+            replay_count=$(( replay_count + 1 ))
+            _print_done "$sid" "$agent" "$tcreated" "$last_msg_time"
         fi
     done <<< "$seed_data"
 
-    echo -e "  ${DIM}Watching... (${old_count} historical, ${replay_count} replayed)${RESET}"
+    local summary_parts=()
+    [ "$old_count" -gt 0 ] && summary_parts+=("${old_count} historical")
+    [ "$replay_count" -gt 0 ] && summary_parts+=("${replay_count} replayed")
+    [ "$active_count" -gt 0 ] && summary_parts+=("${active_count} active")
+    local summary_str=""
+    if [ ${#summary_parts[@]} -gt 0 ]; then
+        summary_str=$(IFS=', '; echo "${summary_parts[*]}")
+    fi
+    echo -e "  ${DIM}Watching... (${summary_str:-no prior sessions})${RESET}"
     echo ""
 
     # ── Poll loop ─────────────────────────────────────────────────
     while true; do
+        sleep "$POLL_INTERVAL"
+
         local new_data
         new_data=$(_query_subagents)
 
-        # Build a set of current session IDs
+        # Build a set of current session IDs from the query
         declare -A current_ids
 
         while IFS=$'\t' read -r sid agent model tcreated msg_count last_msg_time; do
@@ -202,7 +271,7 @@ main() {
             current_ids["$sid"]=1
 
             if [ -z "${known_sessions[$sid]+x}" ]; then
-                # New session detected — print spawn event
+                # ── New session detected — print spawn event
                 local color
                 color=$(_agent_color "$agent")
                 local ts
@@ -211,12 +280,12 @@ main() {
                 known_sessions["$sid"]="${agent}|${model}|${tcreated}|active|${msg_count}|${last_msg_time}|0"
 
             elif [[ "${known_sessions[$sid]}" == *"|active|"* ]]; then
-                # Known active session — check if message activity changed
+                # ── Known active session — check for message activity changes
                 local prev_data="${known_sessions[$sid]}"
-                local prev_msg_count prev_last_msg stable_count
-                prev_msg_count=$(echo "$prev_data" | cut -d'|' -f5)
-                prev_last_msg=$(echo "$prev_data" | cut -d'|' -f6)
-                stable_count=$(echo "$prev_data" | cut -d'|' -f7)
+                _parse_session "$prev_data"
+                local prev_msg_count="$_s_msg_count"
+                local prev_last_msg="$_s_last_msg"
+                local stable_count="$_s_stable"
 
                 if [ "$msg_count" = "$prev_msg_count" ] && [ "$last_msg_time" = "$prev_last_msg" ]; then
                     # No new messages — increment stable counter
@@ -228,21 +297,7 @@ main() {
 
                 if [ "$stable_count" -ge "$STABLE_THRESHOLD" ]; then
                     # Stable long enough — mark as done
-                    local color
-                    color=$(_agent_color "$agent")
-                    local duration=$(( last_msg_time - tcreated ))
-                    local dur_str
-                    dur_str=$(_fmt_duration "$duration")
-                    local ts
-                    ts=$(_fmt_time "$last_msg_time")
-                    # Fetch token usage
-                    local token_line tok_in tok_out tok_cache token_str=""
-                    token_line=$(_query_tokens "$sid")
-                    if [ -n "$token_line" ]; then
-                        IFS=$'\t' read -r tok_in tok_out tok_cache <<< "$token_line"
-                        token_str="  ${DIM}in:$(_fmt_tokens "$tok_in") out:$(_fmt_tokens "$tok_out") cache:$(_fmt_tokens "$tok_cache")${RESET}"
-                    fi
-                    echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}done${RESET}  ${GRAY}${dur_str}${RESET}${token_str}  ${DIM}${ts}${RESET}"
+                    _print_done "$sid" "$agent" "$tcreated" "$last_msg_time"
                     known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
                 else
                     # Still active — update tracking
@@ -251,26 +306,20 @@ main() {
             fi
         done <<< "$new_data"
 
-        # Check for sessions that disappeared from DB while active
+        # ── Check for sessions that disappeared from DB while active
         for sid in "${!known_sessions[@]}"; do
-            local entry="${known_sessions[$sid]}"
-            local status
-            status=$(echo "$entry" | cut -d'|' -f4)
-
-            [ "$status" != "active" ] && continue
+            _parse_session "${known_sessions[$sid]}"
+            [ "$_s_status" != "active" ] && continue
 
             if [ -z "${current_ids[$sid]+x}" ]; then
-                local agent
-                agent=$(echo "$entry" | cut -d'|' -f1)
                 local color
-                color=$(_agent_color "$agent")
-                echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}gone${RESET}"
-                known_sessions["$sid"]="${entry%|*|*|*|*}|done|0|0|0"
+                color=$(_agent_color "$_s_agent")
+                echo -e "  ${color}■${RESET} ${BOLD}${_s_agent}${RESET} ${DIM}gone${RESET}"
+                known_sessions["$sid"]="${_s_agent}|${_s_model}|${_s_tcreated}|done|${_s_msg_count}|${_s_last_msg}|0"
             fi
         done
 
         unset current_ids
-        sleep "$POLL_INTERVAL"
     done
 }
 

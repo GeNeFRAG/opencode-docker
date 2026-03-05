@@ -9,29 +9,41 @@
 #
 # Usage: bash /opt/opencode/agent-status.sh
 
-# A session is "active" if its most recent message arrived in the
-# last 30 seconds and it is a subagent (has parent_id).
-# We use MAX(message.time_created) instead of s.time_updated because
-# the session row's time_updated is only bumped on finalization, not
-# on every new message — so it lags behind actual activity.
-ACTIVE_THRESHOLD_MS=30000
+# A session is "active" if its most recent message arrived within
+# this threshold.  Must be generous enough for agents that pause
+# while thinking (oracle can pause 10-20s between messages).
+# This threshold is intentionally aligned with STABLE_THRESHOLD × POLL_INTERVAL
+# in agent-monitor.sh (5×2=10s) so both scripts agree on what's active.
+ACTIVE_THRESHOLD_MS=15000
 
 now_ms=$(date +%s%3N 2>/dev/null || echo "0")
 STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
 
-# Query active subagent sessions (only from current container lifecycle)
+# Query active subagent sessions (only from current container lifecycle).
+# Uses a pre-aggregated subquery instead of correlated subqueries for speed.
 result=$(opencode db "
     SELECT
-        COALESCE(json_extract(m.data, '\$.agent'), 'unknown') as agent
+        COALESCE(first_msg.agent, 'unknown') as agent
     FROM session s
-    LEFT JOIN message m ON m.session_id = s.id
-        AND m.rowid = (SELECT MIN(rowid) FROM message WHERE session_id = s.id)
+    LEFT JOIN (
+        SELECT
+            m.session_id,
+            json_extract(m.data, '\$.agent') as agent
+        FROM message m
+        INNER JOIN (
+            SELECT session_id, MIN(rowid) as min_rowid
+            FROM message
+            GROUP BY session_id
+        ) fm ON m.session_id = fm.session_id AND m.rowid = fm.min_rowid
+    ) first_msg ON first_msg.session_id = s.id
+    LEFT JOIN (
+        SELECT session_id, MAX(time_created) as last_msg_time
+        FROM message
+        GROUP BY session_id
+    ) agg ON agg.session_id = s.id
     WHERE s.parent_id IS NOT NULL
       AND s.time_created >= ${STARTUP_TS}
-      AND (${now_ms} - COALESCE(
-            (SELECT MAX(time_created) FROM message WHERE session_id = s.id),
-            s.time_created
-          )) < ${ACTIVE_THRESHOLD_MS}
+      AND (${now_ms} - COALESCE(agg.last_msg_time, s.time_created)) < ${ACTIVE_THRESHOLD_MS}
     ORDER BY s.time_created ASC
 " --format tsv 2>/dev/null | tail -n +2)  # skip header
 

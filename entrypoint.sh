@@ -284,6 +284,7 @@ WRAPPER
             --port "${OPENCODE_PORT:-3000}" \
             --interface 0.0.0.0 \
             --writable \
+            -t titleFixed="${OPENCODE_TITLE:-OpenCode (tmux)}" \
             ${OPENCODE_TUI_ARGS:-} \
             /tmp/tmux-wrapper.sh || true
         sleep 3
@@ -302,6 +303,7 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
             --interface 0.0.0.0 \
             --writable \
             --cwd /workspace \
+            -t titleFixed="${OPENCODE_TITLE:-OpenCode (tui)}" \
             ${OPENCODE_TUI_ARGS:-} \
             opencode ${OPENCODE_EXTRA_ARGS:-} || true
         echo ""

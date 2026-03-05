@@ -5,7 +5,9 @@
 # Called by tmux status-left every status-interval seconds.
 # Outputs: " opencode │ main │ claude-opus-4-6 │ 94.7k ctx"
 
-TZ="${AGENT_MONITOR_TZ:-${TZ:-Europe/Berlin}}"
+# TZ is inherited from the environment (set in entrypoint.sh or .env).
+# Defaults to UTC if not set.
+export TZ="${TZ:-UTC}"
 
 # ─── Git branch ───────────────────────────────────────────────────
 branch=$(git -C /workspace branch --show-current 2>/dev/null || echo "?")
