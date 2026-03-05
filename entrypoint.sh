@@ -193,6 +193,11 @@ else
 fi
 echo ""
 
+# ─── Record startup timestamp (ms) for status bar freshness ───────
+# Status scripts use this to ignore sessions from previous container
+# lifecycles — avoids showing stale model/token data after a rebuild.
+date +%s%3N > /tmp/.opencode-startup-ts
+
 # ─── Mode selection ───────────────────────────────────────────────
 # OPENCODE_MODE=web  (default) — opencode web UI served on OPENCODE_PORT
 # OPENCODE_MODE=tui            — opencode TUI exposed via ttyd on OPENCODE_PORT

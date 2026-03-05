@@ -1,6 +1,6 @@
-# OpenCode Web — Docker
+# OpenCode — Docker
 
-Run [OpenCode](https://github.com/opencode-ai/opencode) — an AI coding agent — entirely inside Docker, accessible from any browser. No local Node.js, no CLI install, no environment clutter. Point it at your LLM provider, pick a UI mode, and open `localhost:3000`.
+Run [OpenCode](https://github.com/opencode-ai/opencode) — an AI coding agent — entirely inside Docker, accessible from any browser. No local Node.js, no CLI install, no environment clutter. Point it at your LLM provider, pick a UI mode, and open `localhost:3000`. Run multiple repos side-by-side — each gets its own container, port, and data volumes.
 
 Three modes, all served in the browser:
 
@@ -9,8 +9,6 @@ Three modes, all served in the browser:
 | **web** (default) | `OPENCODE_MODE=web` | OpenCode's built-in browser UI |
 | **tui** | `OPENCODE_MODE=tui` | The full terminal UI rendered in the browser via [ttyd](https://github.com/tsl0922/ttyd) / xterm.js — identical to running `opencode` in a local terminal |
 | **tmux** | `OPENCODE_MODE=tmux` | Same terminal UI, but wrapped in a persistent [tmux](https://github.com/tmux/tmux) session — survives browser disconnects, supports pane splitting, shell access alongside opencode, and a built-in agent activity monitor |
-
-Each repo gets its own isolated container with dedicated volumes, MCP servers, and port.
 
 ## Quick Start
 
@@ -23,6 +21,46 @@ open http://localhost:3000
 ```
 
 > **Corporate proxy?** Copy your CA bundle to `./ca-bundle.pem` and set `CA_CERT_PATH` in `.env`.
+
+## Multi-Repo Setup
+
+Each project gets its own container, port, and data volumes.
+
+**1.** Create your override file:
+
+```bash
+cp docker-compose.override.yml.example docker-compose.override.yml
+```
+
+**2.** Add a service per repo (see the example file for full template):
+
+```yaml
+services:
+  my-project:
+    extends:
+      file: docker-compose.yml
+      service: opencode-docker
+    container_name: opencode-my-project
+    ports:
+      !override
+      - "3001:3001"
+    environment:
+      !override
+      - OPENCODE_PORT=3001
+    volumes:
+      !override
+      - ${REPOS_PATH:-~/repos}/my-project:/workspace
+      - opencode-data-my-project:/root/.local/share/opencode
+      # ... (see docker-compose.override.yml.example for all mounts)
+```
+
+> `!override` (Docker Compose v2.24+) replaces inherited lists instead of merging.
+
+**3.** Start:
+
+```bash
+./opencode-web.sh start my-project
+```
 
 ## UI Modes
 
@@ -258,46 +296,6 @@ When a primary model is unavailable or exceeds `timeoutMs` (default 15s), the ne
 Disable with `"fallback": { "enabled": false }`.
 
 </details>
-
-## Multi-Repo Setup
-
-Each project gets its own container, port, and data volumes.
-
-**1.** Create your override file:
-
-```bash
-cp docker-compose.override.yml.example docker-compose.override.yml
-```
-
-**2.** Add a service per repo (see the example file for full template):
-
-```yaml
-services:
-  my-project:
-    extends:
-      file: docker-compose.yml
-      service: opencode-docker
-    container_name: opencode-my-project
-    ports:
-      !override
-      - "3001:3001"
-    environment:
-      !override
-      - OPENCODE_PORT=3001
-    volumes:
-      !override
-      - ${REPOS_PATH:-~/repos}/my-project:/workspace
-      - opencode-data-my-project:/root/.local/share/opencode
-      # ... (see docker-compose.override.yml.example for all mounts)
-```
-
-> `!override` (Docker Compose v2.24+) replaces inherited lists instead of merging.
-
-**3.** Start:
-
-```bash
-./opencode-web.sh start my-project
-```
 
 ## Troubleshooting
 

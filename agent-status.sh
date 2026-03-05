@@ -17,8 +17,9 @@
 ACTIVE_THRESHOLD_MS=30000
 
 now_ms=$(date +%s%3N 2>/dev/null || echo "0")
+STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
 
-# Query active subagent sessions
+# Query active subagent sessions (only from current container lifecycle)
 result=$(opencode db "
     SELECT
         COALESCE(json_extract(m.data, '\$.agent'), 'unknown') as agent
@@ -26,6 +27,7 @@ result=$(opencode db "
     LEFT JOIN message m ON m.session_id = s.id
         AND m.rowid = (SELECT MIN(rowid) FROM message WHERE session_id = s.id)
     WHERE s.parent_id IS NOT NULL
+      AND s.time_created >= ${STARTUP_TS}
       AND (${now_ms} - COALESCE(
             (SELECT MAX(time_created) FROM message WHERE session_id = s.id),
             s.time_created

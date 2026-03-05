@@ -73,7 +73,10 @@ _print_header() {
 
 # ─── Query subagent sessions from the DB ──────────────────────────
 # Returns TSV: session_id  agent  model  time_created  msg_count  last_msg_time
+# Only considers sessions from the current container lifecycle.
 _query_subagents() {
+    local startup_ts
+    startup_ts=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
     opencode db "
         SELECT
             s.id,
@@ -86,6 +89,7 @@ _query_subagents() {
         LEFT JOIN message m ON m.session_id = s.id
             AND m.rowid = (SELECT MIN(rowid) FROM message WHERE session_id = s.id)
         WHERE s.parent_id IS NOT NULL
+          AND s.time_created >= ${startup_ts}
         ORDER BY s.time_created ASC
     " --format tsv 2>/dev/null | tail -n +2  # skip header
 }
@@ -122,21 +126,67 @@ _fmt_tokens() {
 main() {
     _print_header
 
+    # ── Wait for DB readiness ────────────────────────────────────
+    local db_ok=false
+    for attempt in 1 2 3 4 5; do
+        local db_test
+        db_test=$(opencode db "SELECT COUNT(*) FROM session" --format tsv 2>&1 | tail -n +2 | head -1)
+        if [ -n "$db_test" ] && [[ "$db_test" != *"error"* ]] && [[ "$db_test" != *"Error"* ]]; then
+            db_ok=true
+            break
+        fi
+        echo -e "  ${DIM}Waiting for DB... (attempt ${attempt}/5)${RESET}"
+        sleep 2
+    done
+    if [ "$db_ok" = false ]; then
+        echo -e "  ${RED}✗ Cannot query DB${RESET}"
+        echo ""
+    fi
+
     # Track known sessions
     # key=session_id, value="agent|model|time_created|status|msg_count|last_msg_time|stable_count"
     declare -A known_sessions
 
-    # ── Seed: silently register all existing sessions as "done" ──
-    # so we only display NEW events going forward
-    local seed_data
+    # ── Seed: replay recent sessions, suppress old ones ──────────
+    # Sessions from the last REPLAY_WINDOW are shown immediately so
+    # you see recent activity even if you open the monitor late.
+    local REPLAY_WINDOW_MS=300000  # 5 minutes
+    local now_ms
+    now_ms=$(date +%s%3N 2>/dev/null || echo "0")
+    local replay_cutoff=$(( now_ms - REPLAY_WINDOW_MS ))
+
+    local seed_data old_count=0 replay_count=0
     seed_data=$(_query_subagents)
     while IFS=$'\t' read -r sid agent model tcreated msg_count last_msg_time; do
         [ -z "$sid" ] && continue
-        known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
+
+        if [ "$tcreated" -lt "$replay_cutoff" ]; then
+            # Old session — suppress silently
+            known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
+            old_count=$(( old_count + 1 ))
+        else
+            # Recent session — replay it as a visible completed event
+            known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|0"
+            replay_count=$(( replay_count + 1 ))
+            local color
+            color=$(_agent_color "$agent")
+            local duration=$(( last_msg_time - tcreated ))
+            local dur_str
+            dur_str=$(_fmt_duration "$duration")
+            local ts
+            ts=$(_fmt_time "$last_msg_time")
+            # Fetch token usage
+            local token_line tok_in tok_out tok_cache token_str=""
+            token_line=$(_query_tokens "$sid")
+            if [ -n "$token_line" ]; then
+                IFS=$'\t' read -r tok_in tok_out tok_cache <<< "$token_line"
+                token_str="  ${DIM}in:$(_fmt_tokens "$tok_in") out:$(_fmt_tokens "$tok_out") cache:$(_fmt_tokens "$tok_cache")${RESET}"
+            fi
+            echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}done${RESET}  ${GRAY}${dur_str}${RESET}${token_str}  ${DIM}${ts}${RESET}"
+        fi
     done <<< "$seed_data"
 
-    local seed_count=${#known_sessions[@]}
-    echo -e "  ${DIM}Watching for subagent activity... (${seed_count} historical sessions)${RESET}"
+    echo -e "  ${DIM}Watching... (${old_count} historical, ${replay_count} replayed)${RESET}"
     echo ""
 
     # ── Poll loop ─────────────────────────────────────────────────
@@ -190,7 +240,6 @@ main() {
                     token_line=$(_query_tokens "$sid")
                     if [ -n "$token_line" ]; then
                         IFS=$'\t' read -r tok_in tok_out tok_cache <<< "$token_line"
-                        local total_tok=$(( tok_in + tok_out + tok_cache ))
                         token_str="  ${DIM}in:$(_fmt_tokens "$tok_in") out:$(_fmt_tokens "$tok_out") cache:$(_fmt_tokens "$tok_cache")${RESET}"
                     fi
                     echo -e "  ${color}■${RESET} ${BOLD}${agent}${RESET} ${DIM}done${RESET}  ${GRAY}${dur_str}${RESET}${token_str}  ${DIM}${ts}${RESET}"

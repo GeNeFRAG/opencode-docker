@@ -14,6 +14,9 @@ branch=$(git -C /workspace branch --show-current 2>/dev/null || echo "?")
 # Uses LEFT JOIN so a fresh session (after /new) with no messages
 # still appears — showing 0 context instead of stale data from the
 # previous session.
+# Only considers sessions created/updated after container startup to
+# avoid showing stale data from a previous container lifecycle.
+STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
 read -r model ctx <<< "$(opencode db "
     SELECT
         COALESCE(json_extract(m.data, '\$.modelID'), '?') as model,
@@ -22,6 +25,7 @@ read -r model ctx <<< "$(opencode db "
     LEFT JOIN message m ON m.session_id = s.id
         AND m.rowid = (SELECT MAX(rowid) FROM message WHERE session_id = s.id AND json_extract(data, '\$.role') = 'assistant' AND json_extract(data, '\$.tokens.total') > 0)
     WHERE s.parent_id IS NULL
+      AND s.time_updated >= ${STARTUP_TS}
     ORDER BY s.time_updated DESC
     LIMIT 1
 " --format tsv 2>/dev/null | tail -n +2 | head -1)"
