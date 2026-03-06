@@ -1,5 +1,10 @@
 #!/bin/bash
-set -e
+# NOTE: We intentionally avoid `set -e` here. The entrypoint performs many
+# best-effort operations (CA cert install, npm cache warm, Docker socket
+# queries, auth merges) that may legitimately fail — especially after a
+# host/VM restart when Docker socket or file-share mounts aren't ready yet.
+# Non-critical failures are logged with ⚠ and execution continues.
+# Critical failures (config generation, mode launch) exit explicitly.
 
 # ─── UTF-8 locale (safety net if Dockerfile ENV is not inherited) ──
 export LANG="${LANG:-C.UTF-8}"
@@ -67,6 +72,10 @@ fi
 envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH}' \
     < "${TEMPLATE}" > "${CONFIG_FILE}"
 
+if [ ! -s "${CONFIG_FILE}" ]; then
+    echo "  ✗ FATAL: Config generation failed (${CONFIG_FILE} is empty)"
+    exit 1
+fi
 echo "  ✓ Config written to ${CONFIG_FILE}"
 
 # ─── Generate auth.json if API key is set ──────────────────────────
@@ -115,8 +124,8 @@ fi
 CA_CERT="/certs/ca-bundle.pem"
 if [ -f "${CA_CERT}" ] && [ "${CA_CERT}" != "/dev/null" ] && [ -s "${CA_CERT}" ]; then
     echo "→ Installing corporate CA certificate..."
-    cp "${CA_CERT}" /usr/local/share/ca-certificates/custom-ca.crt
-    update-ca-certificates 2>/dev/null
+    cp "${CA_CERT}" /usr/local/share/ca-certificates/custom-ca.crt 2>/dev/null || true
+    update-ca-certificates 2>/dev/null || true
     export NODE_EXTRA_CA_CERTS="${CA_CERT}"
     export REQUESTS_CA_BUNDLE="${CA_CERT}"
     echo "  ✓ CA certificate installed"
@@ -125,8 +134,11 @@ fi
 # ─── Install opencode plugins if package.json exists ───────────────
 if [ -f "${CONFIG_DIR}/package.json" ]; then
     echo "→ Ensuring opencode plugins are installed..."
-    cd "${CONFIG_DIR}" && npm install --prefer-offline --no-audit --no-fund 2>/dev/null
-    echo "  ✓ Plugins ready"
+    if (cd "${CONFIG_DIR}" && npm install --prefer-offline --no-audit --no-fund 2>/dev/null); then
+        echo "  ✓ Plugins ready"
+    else
+        echo "  ⚠ Plugin install failed (non-fatal) — continuing with cached modules"
+    fi
 fi
 
 # ─── Ensure .opencode project config is available ──────────────────

@@ -14,6 +14,30 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# ─── Pre-flight: ensure host-side mount targets exist ─────────────
+# Docker bind-mounts to files that don't exist will silently create
+# empty *directories*, which confuses later reads. Worse, mounting
+# /dev/null as a file works on native Linux but is fragile on Docker
+# Desktop / Rancher Desktop after a VM restart.
+# This function creates missing placeholder files so Docker always
+# has a real file to mount.
+_preflight() {
+    # Host auth.json — entrypoint merges Copilot tokens from this
+    local auth_dir="${HOME}/.local/share/opencode"
+    local auth_file="${auth_dir}/auth.json"
+    if [ -d "${auth_file}" ]; then
+        # Docker previously created an empty directory here — fix it
+        rmdir "${auth_file}" 2>/dev/null || true
+    fi
+    if [ ! -f "${auth_file}" ]; then
+        mkdir -p "${auth_dir}"
+        echo '{}' > "${auth_file}"
+    fi
+
+    # GitHub Copilot config directory
+    mkdir -p "${HOME}/.config/github-copilot" 2>/dev/null || true
+}
+
 usage() {
     echo "Usage: $0 <command> [service...]"
     echo ""
@@ -43,6 +67,7 @@ usage() {
 case "${1:-help}" in
     start)
         shift
+        _preflight
         echo -e "${GREEN}Starting OpenCode Web...${NC}"
         $COMPOSE up -d --build "$@"
         echo ""
@@ -57,6 +82,7 @@ case "${1:-help}" in
         ;;
     restart)
         shift
+        _preflight
         $COMPOSE restart "$@"
         ;;
     logs)
@@ -73,6 +99,7 @@ case "${1:-help}" in
         ;;
     rebuild)
         shift
+        _preflight
         echo -e "${YELLOW}Rebuilding...${NC}"
         $COMPOSE up -d --build --force-recreate "$@"
         ;;
@@ -85,6 +112,7 @@ case "${1:-help}" in
         ;;
     update)
         shift
+        _preflight
         echo -e "${YELLOW}Pulling latest base image and rebuilding with latest opencode-ai...${NC}"
         $COMPOSE build --no-cache --pull --build-arg OPENCODE_VERSION=latest "$@"
         $COMPOSE up -d "$@"

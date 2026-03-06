@@ -27,13 +27,13 @@ x-opencode-common: &opencode-common
     # ─── SSH & Git ────────────────────────────────────────────
     - ${HOME}/.ssh:/root/.ssh:ro
     - ${HOME}/.gitconfig:/root/.gitconfig:ro
-    - ${GIT_CREDENTIALS_PATH:-/dev/null}:/root/.git-credentials:ro
+    - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
     # ─── GitHub Copilot auth (reuse host token) ────────────────
     - ${HOME}/.config/github-copilot:/root/.config/github-copilot:ro
     # ─── Host auth.json (merged at startup for Copilot etc.) ──
     - ${HOME}/.local/share/opencode/auth.json:/opt/opencode/host-auth.json:ro
     # ─── CA certificate (optional, for corporate proxies) ─────
-    - ${CA_CERT_PATH:-/dev/null}:/certs/ca-bundle.pem:ro
+    - ${CA_CERT_PATH:-.docker/empty-file}:/certs/ca-bundle.pem:ro
   healthcheck: &opencode-healthcheck
     interval: 30s
     timeout: 10s
@@ -80,12 +80,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOME}/.ssh:/root/.ssh:ro
       - ${HOME}/.gitconfig:/root/.gitconfig:ro
-      - ${GIT_CREDENTIALS_PATH:-/dev/null}:/root/.git-credentials:ro
+      - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
       # ─── GitHub Copilot auth (reuse host token) ────────────────
       - ${HOME}/.config/github-copilot:/root/.config/github-copilot:ro
       # ─── Host auth.json (merged at startup for Copilot etc.) ──
       - ${HOME}/.local/share/opencode/auth.json:/opt/opencode/host-auth.json:ro
-      - ${CA_CERT_PATH:-/dev/null}:/certs/ca-bundle.pem:ro
+      - ${CA_CERT_PATH:-.docker/empty-file}:/certs/ca-bundle.pem:ro
 
 volumes:
   opencode-data-self:
@@ -95,4 +95,4 @@ volumes:
 
 secrets:
   ca-cert:
-    file: ${CA_CERT_PATH:-/dev/null}
+    file: ${CA_CERT_PATH:-.docker/empty-file}
