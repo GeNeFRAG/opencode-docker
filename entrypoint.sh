@@ -154,6 +154,17 @@ else
 fi
 
 # ─── Git configuration ────────────────────────────────────────────
+# Validate .gitconfig mount — Docker creates a directory if the host file
+# doesn't exist, which breaks git. Redirect to an empty file in that case.
+GITCONFIG="/root/.gitconfig"
+if [ -d "${GITCONFIG}" ]; then
+    echo "  ⚠ ${GITCONFIG} is a directory (host ~/.gitconfig missing?) — using defaults"
+    echo "    Create ~/.gitconfig on the host, or ignore this if git defaults are fine"
+    export GIT_CONFIG_GLOBAL="/dev/null"
+elif [ -f "${GITCONFIG}" ] && [ -s "${GITCONFIG}" ]; then
+    echo "  ✓ Host .gitconfig mounted"
+fi
+
 # Host .gitconfig is mounted read-only; use env vars to add safe.directory.
 # Discover all git repos under /workspace (supports multi-repo workspaces).
 _git_idx=0

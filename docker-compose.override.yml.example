@@ -43,7 +43,7 @@ services:
       # ─── GitHub Copilot auth (reuse host token) ──────────────
       - ${HOME}/.config/github-copilot:/root/.config/github-copilot:ro
       # ─── Host auth.json (merged at startup for Copilot etc.) ──
-      - ${HOME}/.local/share/opencode/auth.json:/opt/opencode/host-auth.json:ro
+      - ${HOST_AUTH_JSON:-.docker/empty-file}:/opt/opencode/host-auth.json:ro
 
   # ─────────────────────────────────────────────────────────────
   # Example: another-project — http://localhost:3002
@@ -76,7 +76,7 @@ services:
   #     # ─── GitHub Copilot auth (reuse host token) ──────────────
   #     - ${HOME}/.config/github-copilot:/root/.config/github-copilot:ro
   #     # ─── Host auth.json (merged at startup for Copilot etc.) ──
-  #     - ${HOME}/.local/share/opencode/auth.json:/opt/opencode/host-auth.json:ro
+  #     - ${HOST_AUTH_JSON:-.docker/empty-file}:/opt/opencode/host-auth.json:ro
 
   # ─────────────────────────────────────────────────────────────
   # Example: multi-repo workspace — http://localhost:3003
@@ -120,7 +120,7 @@ services:
   #     - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
   #     - ${CA_CERT_PATH:-.docker/empty-file}:/certs/ca-bundle.pem:ro
   #     - ${HOME}/.config/github-copilot:/root/.config/github-copilot:ro
-  #     - ${HOME}/.local/share/opencode/auth.json:/opt/opencode/host-auth.json:ro
+  #     - ${HOST_AUTH_JSON:-.docker/empty-file}:/opt/opencode/host-auth.json:ro
 
 volumes:
   opencode-data-my-project:

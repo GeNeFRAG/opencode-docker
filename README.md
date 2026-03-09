@@ -185,7 +185,8 @@ Set these three in `.env`:
 | `PREFILL_PROXY` | Enable the prefill-stripping proxy (default: `true`). Set `false` to connect directly to `LLM_BASE_URL`. |
 | `PROXY_LOG_LEVEL` | Prefill proxy verbosity: `debug` / `info` (default) / `warn` / `error` |
 | `DOCKER_NETWORK_MODE` | Set to `host` on Linux to bypass Docker bridge NAT (~70-80ms savings). Not supported on Docker Desktop. |
-| `GIT_CREDENTIALS_PATH` | Host path to `.git-credentials` for HTTPS push (default: `/dev/null` = disabled) |
+| `GIT_CREDENTIALS_PATH` | Host path to `.git-credentials` for HTTPS push (default: disabled) |
+| `HOST_AUTH_JSON` | Host path to `auth.json` for Copilot tokens etc. (default: disabled) |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `GITHUB_ENTERPRISE_TOKEN` | GitHub Enterprise PAT |
 | `GITHUB_ENTERPRISE_URL` | GitHub Enterprise URL |
