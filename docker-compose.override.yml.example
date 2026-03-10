@@ -36,6 +36,8 @@ services:
       - opencode-data-my-project:/root/.local/share/opencode
       - opencode-memory-my-project:/root/.config/opencode/memory
       - /var/run/docker.sock:/var/run/docker.sock
+      # ─── .env file (reloaded on container restart) ──────────
+      - ./.env:/opt/opencode/.env:ro
       - ${HOME}/.ssh:/root/.ssh:ro
       - ${HOME}/.gitconfig:/root/.gitconfig:ro
       - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
@@ -69,6 +71,8 @@ services:
   #     - opencode-data-another:/root/.local/share/opencode
   #     - opencode-memory-another:/root/.config/opencode/memory
   #     - /var/run/docker.sock:/var/run/docker.sock
+  #     # ─── .env file (reloaded on container restart) ──────────
+  #     - ./.env:/opt/opencode/.env:ro
   #     - ${HOME}/.ssh:/root/.ssh:ro
   #     - ${HOME}/.gitconfig:/root/.gitconfig:ro
   #     - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
@@ -115,6 +119,8 @@ services:
   #     - opencode-data-fullstack:/root/.local/share/opencode
   #     - opencode-memory-fullstack:/root/.config/opencode/memory
   #     - /var/run/docker.sock:/var/run/docker.sock
+  #     # ─── .env file (reloaded on container restart) ──────────
+  #     - ./.env:/opt/opencode/.env:ro
   #     - ${HOME}/.ssh:/root/.ssh:ro
   #     - ${HOME}/.gitconfig:/root/.gitconfig:ro
   #     - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro

@@ -36,6 +36,16 @@ _preflight() {
 
     # GitHub Copilot config directory
     mkdir -p "${HOME}/.config/github-copilot" 2>/dev/null || true
+
+    # .env file — Docker bind-mounts create an empty directory if the
+    # source file doesn't exist, which breaks env_file and .env reload.
+    if [ -d "${SCRIPT_DIR}/.env" ]; then
+        rmdir "${SCRIPT_DIR}/.env" 2>/dev/null || true
+    fi
+    if [ ! -f "${SCRIPT_DIR}/.env" ]; then
+        touch "${SCRIPT_DIR}/.env"
+        echo -e "${YELLOW}  Created empty .env (copy .env.example and fill in your values)${NC}"
+    fi
 }
 
 usage() {
@@ -83,7 +93,11 @@ case "${1:-help}" in
     restart)
         shift
         _preflight
-        $COMPOSE restart "$@"
+        echo -e "${YELLOW}Restarting (recreating containers to pick up .env changes)...${NC}"
+        $COMPOSE up -d --force-recreate "$@"
+        echo ""
+        echo -e "${GREEN}✓ Services restarted:${NC}"
+        $COMPOSE ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || $COMPOSE ps
         ;;
     logs)
         shift
