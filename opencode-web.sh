@@ -115,7 +115,8 @@ case "${1:-help}" in
         shift
         _preflight
         echo -e "${YELLOW}Rebuilding...${NC}"
-        $COMPOSE up -d --build --force-recreate "$@"
+        $COMPOSE build --build-arg CACHEBUST_OPENCODE="$(date +%s)" "$@"
+        $COMPOSE up -d --force-recreate "$@"
         ;;
     status)
         $COMPOSE ps

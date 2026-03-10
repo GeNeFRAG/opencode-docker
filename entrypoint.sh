@@ -64,12 +64,6 @@ DATA_DIR="/root/.local/share/opencode"
 TEMPLATE="/opt/opencode/opencode.json.template"
 CONFIG_FILE="${CONFIG_DIR}/opencode.json"
 
-OPENCODE_VER=$(opencode --version 2>/dev/null || echo "unknown")
-echo "╔══════════════════════════════════════════╗"
-echo "║       OpenCode Web - Docker Container    ║"
-echo "║       opencode-ai v${OPENCODE_VER}$(printf '%*s' $((22 - ${#OPENCODE_VER})) '')║"
-echo "╚══════════════════════════════════════════╝"
-
 # ─── Generate opencode.json from template + env vars ───────────────
 echo "→ Generating opencode.json from template..."
 
@@ -338,15 +332,42 @@ _restart_proxy() {
 
 cd /workspace
 
+# ── Resolve the Go binary and export OPENCODE_BIN_PATH ────────────
+# The Dockerfile copies the Go binary to /usr/local/bin/opencode-go at
+# build time — outside node_modules, immune to runtime destruction by
+# oh-my-opencode-slim auto-update or `opencode upgrade`.
+# The npm wrapper at /usr/local/bin/opencode is a fragile fallback only.
+OPENCODE_STABLE_BIN="/usr/local/bin/opencode-go"
+OPENCODE_NPM_WRAPPER="/usr/local/bin/opencode"
+
+if [ -x "${OPENCODE_STABLE_BIN}" ]; then
+    export OPENCODE_BIN_PATH="${OPENCODE_STABLE_BIN}"
+    echo "  ✓ opencode binary: ${OPENCODE_STABLE_BIN}"
+elif [ -x "${OPENCODE_NPM_WRAPPER}" ]; then
+    export OPENCODE_BIN_PATH="${OPENCODE_NPM_WRAPPER}"
+    echo "  ⚠ Stable binary missing — falling back to npm wrapper (fragile)"
+else
+    echo "  ✗ FATAL: opencode binary not found"
+    echo "    Expected: ${OPENCODE_STABLE_BIN}"
+    echo "    Fallback: ${OPENCODE_NPM_WRAPPER}"
+    exit 1
+fi
+
+OPENCODE_VER=$("${OPENCODE_BIN_PATH}" --version 2>/dev/null || echo "unknown")
+echo "╔══════════════════════════════════════════╗"
+echo "║       OpenCode Web - Docker Container    ║"
+echo "║       opencode-ai v${OPENCODE_VER}$(printf '%*s' $((22 - ${#OPENCODE_VER})) '')║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
+
 if [ "${OPENCODE_MODE}" = "tmux" ]; then
     # ── tmux mode: run opencode inside tmux, served by ttyd ──────
     # Architecture: ttyd → wrapper script → tmux new/attach → opencode
     #
-    # Key insight: ttyd negotiates terminal dimensions with the browser
-    # BEFORE spawning the child process. By deferring tmux session
-    # creation to the wrapper script (which ttyd spawns), the session
-    # inherits the correct terminal size from the start — no hooks,
-    # no polling, no race conditions.
+    # Restart on /exit is handled by tmux itself:
+    #   remain-on-exit on  → keeps dead pane visible
+    #   pane-died hook     → respawns after 2s delay
+    # See tmux.conf for the hook definition.
     #
     # Browser disconnects don't kill the tmux session; reopening the
     # URL reattaches instantly.
@@ -367,31 +388,41 @@ if [ "${OPENCODE_MODE}" = "tmux" ]; then
     cat > /tmp/tmux-wrapper.sh <<'WRAPPER'
 #!/bin/bash
 TMUX_SESSION="opencode"
+
+if [ "${1:-}" = "--loop" ]; then
+    exec "$OPENCODE_BIN_PATH" $OPENCODE_EXTRA_ARGS
+fi
+
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    # Session exists (reconnection or browser refresh) — just attach.
     exec tmux -u attach -t "$TMUX_SESSION"
 else
-    # First connection — create session with correct terminal dimensions.
-    # ttyd has already negotiated the real browser size, so $COLUMNS/$LINES
-    # (or tput) reflect the actual dimensions. We pass -x/-y to ensure
-    # the detached session starts at the right size BEFORE opencode renders.
-    # -u forces UTF-8 mode regardless of locale detection.
     COLS=$(tput cols  2>/dev/null || echo 180)
     ROWS=$(tput lines 2>/dev/null || echo 50)
     tmux -u new-session -d -s "$TMUX_SESSION" -x "$COLS" -y "$ROWS" -c /workspace \
-        "while true; do /usr/local/bin/opencode EXTRA_ARGS_PLACEHOLDER; echo ''; echo '  ⟳ opencode exited. Restarting in 3s...'; echo ''; sleep 3; done"
-    # tmux is invisible infrastructure — no status bar, no split panes.
-    # The user sees only opencode, identical to plain tui mode.
-    # Agent monitor is available on demand: Ctrl-a m (split) / Ctrl-a M (fullscreen)
+        "/tmp/tmux-wrapper.sh --loop"
     exec tmux -u attach -t "$TMUX_SESSION"
 fi
 WRAPPER
-    sed -i "s|EXTRA_ARGS_PLACEHOLDER|${OPENCODE_EXTRA_ARGS:-}|" /tmp/tmux-wrapper.sh
+    # Inject OPENCODE_EXTRA_ARGS and OPENCODE_BIN_PATH into the wrapper script
+    # via envsubst. Restricted mode substitutes ONLY the listed variables,
+    # leaving $TMUX_SESSION etc. untouched.
+    # This safely handles pipe chars, slashes, and other special characters.
+    export OPENCODE_EXTRA_ARGS="${OPENCODE_EXTRA_ARGS:-}"
+    # OPENCODE_BIN_PATH is already exported by the binary resolution block above
+    envsubst '$OPENCODE_EXTRA_ARGS $OPENCODE_BIN_PATH' < /tmp/tmux-wrapper.sh > /tmp/tmux-wrapper-final.sh \
+        && mv /tmp/tmux-wrapper-final.sh /tmp/tmux-wrapper.sh \
+        || { rm -f /tmp/tmux-wrapper-final.sh; echo "  ✗ Failed to inject env vars into wrapper"; exit 1; }
     chmod +x /tmp/tmux-wrapper.sh
 
     # ttyd serves the wrapper. If ttyd crashes, restart it.
     # The tmux session persists independently across ttyd restarts.
     while true; do
+        # Validate wrapper script still exists (e.g., /tmp cleanup)
+        if [ ! -x /tmp/tmux-wrapper.sh ]; then
+            echo "  ✗ /tmp/tmux-wrapper.sh missing or not executable — cannot start tmux session"
+            echo "    Container restart required to regenerate the wrapper script."
+            exit 1
+        fi
         ttyd \
             --port "${OPENCODE_PORT:-3000}" \
             --interface 0.0.0.0 \
@@ -399,6 +430,9 @@ WRAPPER
             -t titleFixed="${OPENCODE_TITLE:-OpenCode (tmux)}" \
             ${OPENCODE_TUI_ARGS:-} \
             /tmp/tmux-wrapper.sh || true
+        echo ""
+        echo "  ⟳ ttyd exited ($(date)). Restarting in 3s..."
+        echo ""
         sleep 3
     done
 
@@ -417,7 +451,7 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
             --cwd /workspace \
             -t titleFixed="${OPENCODE_TITLE:-OpenCode (tui)}" \
             ${OPENCODE_TUI_ARGS:-} \
-            opencode ${OPENCODE_EXTRA_ARGS:-} || true
+            "${OPENCODE_BIN_PATH}" ${OPENCODE_EXTRA_ARGS:-} || true
         echo ""
         echo "  ⟳ ttyd exited ($(date)). Restarting in 3s..."
         echo ""
@@ -431,7 +465,7 @@ else
     echo ""
 
     while true; do
-        /usr/local/bin/opencode web \
+        "${OPENCODE_BIN_PATH}" web \
             --hostname 0.0.0.0 \
             --port "${OPENCODE_PORT:-3000}" \
             ${OPENCODE_EXTRA_ARGS:-} || true

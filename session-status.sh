@@ -19,7 +19,8 @@ branch=$(git -C /workspace branch --show-current 2>/dev/null || echo "?")
 # Only considers sessions created/updated after container startup to
 # avoid showing stale data from a previous container lifecycle.
 STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
-read -r model ctx <<< "$(opencode db "
+OPENCODE="${OPENCODE_BIN_PATH:-opencode}"
+read -r model ctx <<< "$($OPENCODE db "
     SELECT
         COALESCE(json_extract(m.data, '\$.modelID'), '?') as model,
         COALESCE(json_extract(m.data, '\$.tokens.total'), 0) as ctx

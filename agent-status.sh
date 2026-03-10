@@ -20,7 +20,7 @@ STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
 
 # Query active subagent sessions (only from current container lifecycle).
 # Uses a pre-aggregated subquery instead of correlated subqueries for speed.
-result=$(opencode db "
+result=$(${OPENCODE_BIN_PATH:-opencode} db "
     SELECT
         COALESCE(first_msg.agent, 'unknown') as agent
     FROM session s

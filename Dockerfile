@@ -20,7 +20,11 @@ ENV NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
 ENV NODE_OPTIONS="--use-openssl-ca"
 
 # Install opencode-ai globally
+# CACHEBUST_OPENCODE: changing this value invalidates the npm install cache
+# so Docker re-fetches the latest version even when OPENCODE_VERSION=latest.
+# opencode-web.sh rebuild/update pass --build-arg CACHEBUST_OPENCODE=$(date +%s).
 ARG OPENCODE_VERSION=latest
+ARG CACHEBUST_OPENCODE=0
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 
 # Install provider SDKs, plugins, and oh-my-opencode-slim
@@ -110,7 +114,13 @@ COPY --from=builder /root/.npm /root/.npm
 COPY oh-my-opencode-slim.json.example /root/.config/opencode/oh-my-opencode-slim.json
 
 # Re-create global bin symlinks (npm symlinks are lost across stages)
-RUN ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode && \
+# IMPORTANT: Copy the Go binary to a stable path OUTSIDE node_modules.
+# oh-my-opencode-slim's auto-update-checker can rm -rf and rebuild
+# node_modules at runtime, destroying the binary mid-session.
+# /usr/local/bin/opencode-go is immune to npm/bun operations.
+RUN cp /usr/local/lib/node_modules/opencode-ai/bin/.opencode /usr/local/bin/opencode-go && \
+    chmod +x /usr/local/bin/opencode-go && \
+    ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode && \
     ln -sf ../lib/node_modules/@modelcontextprotocol/server-memory/dist/index.js /usr/local/bin/mcp-server-memory && \
     ln -sf ../lib/node_modules/@upstash/context7-mcp/dist/index.js /usr/local/bin/context7-mcp && \
     ln -sf ../lib/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js /usr/local/bin/mcp-server-sequential-thinking && \
