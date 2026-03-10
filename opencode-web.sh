@@ -61,7 +61,7 @@ usage() {
     echo "  down              Stop and remove all containers"
     echo "  status            Show all services"
     echo "  urls              Show all running URLs"
-    echo "  update [svc...]   Rebuild with latest opencode-ai version"
+    echo "  nuke [svc...]     Rebuild with latest opencode-ai version"
     echo "  version [svc]     Show current opencode-ai version in container"
     echo ""
     echo "Services are defined in docker-compose.yml and docker-compose.override.yml"
@@ -125,7 +125,7 @@ case "${1:-help}" in
         echo -e "${CYAN}OpenCode Web URLs:${NC}"
         $COMPOSE ps --format "table {{.Name}}\t{{.Ports}}" 2>/dev/null || $COMPOSE ps
         ;;
-    update)
+    nuke)
         shift
         _preflight
         echo -e "${YELLOW}Pulling latest base image and rebuilding with latest opencode-ai...${NC}"

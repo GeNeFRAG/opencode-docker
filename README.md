@@ -150,7 +150,7 @@ If `/root/.config/opencode/tmux.conf` exists, it replaces the built-in config at
 ./opencode-web.sh logs    [service]   # Follow logs
 ./opencode-web.sh shell   [service]   # Bash into container
 ./opencode-web.sh rebuild [service]   # Force rebuild & start
-./opencode-web.sh update  [service]   # Rebuild with latest opencode-ai
+./opencode-web.sh nuke    [service]   # Rebuild with latest opencode-ai
 ./opencode-web.sh version [service]   # Show opencode-ai version in container
 ./opencode-web.sh status              # Show all services
 ./opencode-web.sh urls                # Show running URLs/ports
@@ -316,7 +316,7 @@ Disable with `"fallback": { "enabled": false }`.
 
 Packages are installed at Docker image build time only — there are no in-container auto-updates.
 
-- **Update to latest**: `./opencode-web.sh update [service]` — rebuilds the image with the latest `opencode-ai`
+- **Update to latest**: `./opencode-web.sh nuke [service]` — rebuilds the image with the latest `opencode-ai`
 - **Check version**: `./opencode-web.sh version [service]`
 - **Pin version**: Set `OPENCODE_VERSION=1.2.15` in `.env` to lock the build to a specific release
 
