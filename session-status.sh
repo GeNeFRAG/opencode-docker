@@ -26,7 +26,11 @@ if [ -f "$CACHE_FILE" ]; then
 fi
 
 # ─── Git branch ───────────────────────────────────────────────────
-branch=$(git -C /workspace branch --show-current 2>/dev/null || echo "?")
+branch=$(git -C /workspace branch --show-current 2>/dev/null)
+# Detached HEAD: --show-current returns empty; try short SHA instead
+if [ -z "$branch" ] && git -C /workspace rev-parse --is-inside-work-tree &>/dev/null; then
+    branch=$(git -C /workspace rev-parse --short HEAD 2>/dev/null)
+fi
 
 # ─── Current session: model + context size (tokens.total from latest assistant msg)
 # Uses LEFT JOIN so a fresh session (after /new) with no messages
@@ -67,6 +71,10 @@ else
 fi
 
 # ─── Output ───────────────────────────────────────────────────────
-output="#[fg=#7aa2f7,bold] opencode #[fg=#565f89]│#[fg=#9ece6a] ${branch} #[fg=#565f89]│#[fg=#bb9af7] ${model:-?} #[fg=#565f89]│#[fg=#e0af68] ${ctx_str} ctx "
+branch_segment=""
+if [ -n "$branch" ]; then
+    branch_segment="#[fg=#565f89]│#[fg=#9ece6a] ${branch} "
+fi
+output="#[fg=#7aa2f7,bold] opencode ${branch_segment}#[fg=#565f89]│#[fg=#bb9af7] ${model:-?} #[fg=#565f89]│#[fg=#e0af68] ${ctx_str} ctx "
 echo "$output" > "$CACHE_FILE"
 echo "$output"
