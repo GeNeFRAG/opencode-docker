@@ -6,6 +6,9 @@
 # Non-critical failures are logged with ⚠ and execution continues.
 # Critical failures (config generation, mode launch) exit explicitly.
 
+# ─── Secrets hygiene: make files owner-only by default ─────────────
+umask 077
+
 # ─── UTF-8 locale (safety net if Dockerfile ENV is not inherited) ──
 export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
@@ -64,6 +67,24 @@ DATA_DIR="/root/.local/share/opencode"
 TEMPLATE="/opt/opencode/opencode.json.template"
 CONFIG_FILE="${CONFIG_DIR}/opencode.json"
 
+# ─── Reusable config generation (called on startup + proxy fallback) ─
+_generate_config() {
+    envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH}' \
+        < "${TEMPLATE}" > "${CONFIG_FILE}"
+    chmod 600 "${CONFIG_FILE}"
+    if [ ! -s "${CONFIG_FILE}" ]; then
+        echo "  ✗ FATAL: Config generation failed (${CONFIG_FILE} is empty)"
+        exit 1
+    fi
+}
+
+# ─── Cleanup on SIGTERM (reap background proxy) ───────────────────
+_cleanup() {
+    [ -n "${PROXY_PID:-}" ] && kill "${PROXY_PID}" 2>/dev/null
+    exit 0
+}
+trap _cleanup SIGTERM SIGINT
+
 # ─── Generate opencode.json from template + env vars ───────────────
 echo "→ Generating opencode.json from template..."
 
@@ -112,31 +133,16 @@ else
     export LLM_EFFECTIVE_URL="${LLM_BASE_URL}"
 fi
 
-envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH}' \
-    < "${TEMPLATE}" > "${CONFIG_FILE}"
-
-if [ ! -s "${CONFIG_FILE}" ]; then
-    echo "  ✗ FATAL: Config generation failed (${CONFIG_FILE} is empty)"
-    exit 1
-fi
+_generate_config
 echo "  ✓ Config written to ${CONFIG_FILE}"
 
 # ─── Generate auth.json if API key is set ──────────────────────────
 AUTH_FILE="${DATA_DIR}/auth.json"
 if [ -n "${LLM_API_KEY}" ]; then
     echo "→ Writing auth.json..."
-    cat > "${AUTH_FILE}" <<EOF
-{
-  "anthropic": {
-    "type": "api",
-    "key": "${LLM_API_KEY}"
-  },
-  "llm": {
-    "type": "api",
-    "key": "${LLM_API_KEY}"
-  }
-}
-EOF
+    jq -n --arg key "${LLM_API_KEY}" \
+        '{"anthropic":{"type":"api","key":$key},"llm":{"type":"api","key":$key}}' \
+        > "${AUTH_FILE}"
     echo "  ✓ Auth configured"
 fi
 
@@ -146,7 +152,9 @@ fi
 # NOT already in the container's auth.json get merged in (host entries
 # never overwrite container entries like "llm" or "anthropic").
 HOST_AUTH="/opt/opencode/host-auth.json"
-if [ -f "${HOST_AUTH}" ] && [ -s "${HOST_AUTH}" ] && [ -f "${AUTH_FILE}" ]; then
+if ! command -v jq &>/dev/null; then
+    echo "  ⚠ jq not available — skipping host auth merge"
+elif [ -f "${HOST_AUTH}" ] && [ -s "${HOST_AUTH}" ] && [ -f "${AUTH_FILE}" ]; then
     MERGED=$(jq -s '.[0] * .[1]' \
         "${HOST_AUTH}" "${AUTH_FILE}" 2>/dev/null) || true
     if [ -n "${MERGED}" ]; then
@@ -165,7 +173,7 @@ fi
 # ─── Handle corporate CA certificates ──────────────────────────────
 # docker-compose mounts the host cert to /certs/ca-bundle.pem
 CA_CERT="/certs/ca-bundle.pem"
-if [ -f "${CA_CERT}" ] && [ "${CA_CERT}" != "/dev/null" ] && [ -s "${CA_CERT}" ]; then
+if [ -f "${CA_CERT}" ] && [ -s "${CA_CERT}" ]; then
     echo "→ Installing corporate CA certificate..."
     cp "${CA_CERT}" /usr/local/share/ca-certificates/custom-ca.crt 2>/dev/null || true
     update-ca-certificates 2>/dev/null || true
@@ -210,16 +218,21 @@ fi
 
 # Host .gitconfig is mounted read-only; use env vars to add safe.directory.
 # Discover all git repos under /workspace (supports multi-repo workspaces).
+# Capture once into an array to avoid re-globbing later (TOCTOU safety).
+_gitdirs=()
+[ -d /workspace/.git ] && _gitdirs+=(/workspace/.git)
+for _g in /workspace/*/.git; do
+    [ -d "${_g}" ] && _gitdirs+=("${_g}")
+done
+
 _git_idx=0
-_repo_count=0
-for _gitdir in /workspace/.git /workspace/*/.git; do
-    [ -d "${_gitdir}" ] || continue
+for _gitdir in "${_gitdirs[@]}"; do
     _repo_path="$(dirname "${_gitdir}")"
     export "GIT_CONFIG_KEY_${_git_idx}=safe.directory"
     export "GIT_CONFIG_VALUE_${_git_idx}=${_repo_path}"
     _git_idx=$((_git_idx + 1))
-    _repo_count=$((_repo_count + 1))
 done
+_repo_count=${#_gitdirs[@]}
 export GIT_CONFIG_COUNT="${_git_idx}"
 
 if [ "${_repo_count}" -gt 1 ]; then
@@ -243,8 +256,7 @@ fi
 # empty. Symlinking repos into $HOME makes them discoverable.
 if [ "${_repo_count}" -gt 1 ]; then
     # Multi-repo: symlink each sub-repo individually
-    for _gitdir in /workspace/*/.git; do
-        [ -d "${_gitdir}" ] || continue
+    for _gitdir in "${_gitdirs[@]}"; do
         _repo_path="$(dirname "${_gitdir}")"
         _repo_name="$(basename "${_repo_path}")"
         if [ ! -e "${HOME}/${_repo_name}" ]; then
@@ -254,7 +266,7 @@ if [ "${_repo_count}" -gt 1 ]; then
     echo "  ✓ Symlinked ${_repo_count} repos into ~/ for project discovery"
 else
     # Single-repo: symlink /workspace itself
-    WORKSPACE_NAME="$(basename "$(cd /workspace && git rev-parse --show-toplevel 2>/dev/null || echo /workspace)")"
+    WORKSPACE_NAME="$(basename "$(git -C /workspace rev-parse --show-toplevel 2>/dev/null || echo /workspace)")"
     if [ ! -e "${HOME}/${WORKSPACE_NAME}" ]; then
         ln -sf /workspace "${HOME}/${WORKSPACE_NAME}"
         echo "  ✓ Symlinked /workspace → ~/${WORKSPACE_NAME}"
@@ -267,9 +279,21 @@ if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
     UPSTREAM_URL="${LLM_BASE_URL}" PROXY_PORT=18080 \
         node /opt/opencode/prefill-proxy.mjs &
     PROXY_PID=$!
-    sleep 1
 
-    if kill -0 "${PROXY_PID}" 2>/dev/null; then
+    # Poll for readiness instead of a fixed sleep (up to 5s)
+    _proxy_ready=false
+    for _i in $(seq 1 10); do
+        if ! kill -0 "${PROXY_PID}" 2>/dev/null; then
+            break  # process died
+        fi
+        if curl -s -o /dev/null "http://127.0.0.1:18080/models" 2>/dev/null; then
+            _proxy_ready=true
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ "${_proxy_ready}" = "true" ]; then
         echo "  ✓ Prefill proxy running (PID ${PROXY_PID})"
         # Warm up TLS — establish the keep-alive connection to upstream now so
         # the first real user request doesn't pay the TCP+TLS handshake cost.
@@ -278,10 +302,10 @@ if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
             "http://127.0.0.1:18080/models" 2>/dev/null || true
     else
         echo "  ✗ Prefill proxy failed to start — falling back to direct connection"
+        unset PROXY_PID
         # Re-generate config to point directly at the upstream URL
         export LLM_EFFECTIVE_URL="${LLM_BASE_URL}"
-        envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH}' \
-            < "${TEMPLATE}" > "${CONFIG_FILE}"
+        _generate_config
     fi
 else
     echo "→ Prefill proxy disabled — connecting directly to ${LLM_BASE_URL}"
@@ -315,7 +339,7 @@ TMUX_SESSION="opencode"
 # ── Proxy liveness helper (web mode only) ─────────────────────────
 _restart_proxy() {
     if [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
-        if ! kill -0 "${PROXY_PID:-0}" 2>/dev/null; then
+        if [ -z "${PROXY_PID:-}" ] || ! kill -0 "${PROXY_PID}" 2>/dev/null; then
             echo "  ⟳ Prefill proxy not running — restarting..."
             UPSTREAM_URL="${LLM_BASE_URL}" PROXY_PORT=18080 \
                 node /opt/opencode/prefill-proxy.mjs &
@@ -325,6 +349,7 @@ _restart_proxy() {
                 echo "  ✓ Prefill proxy restarted (PID ${PROXY_PID})"
             else
                 echo "  ✗ Prefill proxy failed to restart — continuing without proxy"
+                unset PROXY_PID
             fi
         fi
     fi
@@ -354,9 +379,12 @@ else
 fi
 
 OPENCODE_VER=$("${OPENCODE_BIN_PATH}" --version 2>/dev/null || echo "unknown")
+OPENCODE_VER="${OPENCODE_VER:0:22}"  # clamp to fit banner width
+_ver_pad=$((22 - ${#OPENCODE_VER}))
+[ "${_ver_pad}" -lt 0 ] && _ver_pad=0
 echo "╔══════════════════════════════════════════╗"
 echo "║       OpenCode Web - Docker Container    ║"
-echo "║       opencode-ai v${OPENCODE_VER}$(printf '%*s' $((22 - ${#OPENCODE_VER})) '')║"
+echo "║       opencode-ai v${OPENCODE_VER}$(printf '%*s' "${_ver_pad}" '')║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
@@ -385,12 +413,16 @@ if [ "${OPENCODE_MODE}" = "tmux" ]; then
 
     # Write the tmux wrapper script. ttyd executes this on each browser
     # connection. Terminal dimensions are already correct at this point.
+    # Uses 'WRAPPER' (quoted) heredoc so no variable expansion at write time —
+    # OPENCODE_BIN_PATH and OPENCODE_EXTRA_ARGS are read from the environment
+    # at runtime (both are already exported). No envsubst needed.
+    export OPENCODE_EXTRA_ARGS="${OPENCODE_EXTRA_ARGS:-}"
     cat > /tmp/tmux-wrapper.sh <<'WRAPPER'
 #!/bin/bash
 TMUX_SESSION="opencode"
 
 if [ "${1:-}" = "--loop" ]; then
-    exec "$OPENCODE_BIN_PATH" $OPENCODE_EXTRA_ARGS
+    exec "${OPENCODE_BIN_PATH}" ${OPENCODE_EXTRA_ARGS}
 fi
 
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
@@ -403,19 +435,11 @@ else
     exec tmux -u attach -t "$TMUX_SESSION"
 fi
 WRAPPER
-    # Inject OPENCODE_EXTRA_ARGS and OPENCODE_BIN_PATH into the wrapper script
-    # via envsubst. Restricted mode substitutes ONLY the listed variables,
-    # leaving $TMUX_SESSION etc. untouched.
-    # This safely handles pipe chars, slashes, and other special characters.
-    export OPENCODE_EXTRA_ARGS="${OPENCODE_EXTRA_ARGS:-}"
-    # OPENCODE_BIN_PATH is already exported by the binary resolution block above
-    envsubst '$OPENCODE_EXTRA_ARGS $OPENCODE_BIN_PATH' < /tmp/tmux-wrapper.sh > /tmp/tmux-wrapper-final.sh \
-        && mv /tmp/tmux-wrapper-final.sh /tmp/tmux-wrapper.sh \
-        || { rm -f /tmp/tmux-wrapper-final.sh; echo "  ✗ Failed to inject env vars into wrapper"; exit 1; }
     chmod +x /tmp/tmux-wrapper.sh
 
     # ttyd serves the wrapper. If ttyd crashes, restart it.
     # The tmux session persists independently across ttyd restarts.
+    _fail_count=0
     while true; do
         # Validate wrapper script still exists (e.g., /tmp cleanup)
         if [ ! -x /tmp/tmux-wrapper.sh ]; then
@@ -429,11 +453,14 @@ WRAPPER
             --writable \
             -t titleFixed="${OPENCODE_TITLE:-OpenCode (tmux)}" \
             ${OPENCODE_TUI_ARGS:-} \
-            /tmp/tmux-wrapper.sh || true
+            /tmp/tmux-wrapper.sh
+        _rc=$?
+        if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
+        _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))
         echo ""
-        echo "  ⟳ ttyd exited ($(date)). Restarting in 3s..."
+        echo "  ⟳ ttyd exited (rc=${_rc}). Restart #${_fail_count} in ${_sleep}s..."
         echo ""
-        sleep 3
+        sleep "${_sleep}"
     done
 
 elif [ "${OPENCODE_MODE}" = "tui" ]; then
@@ -442,7 +469,8 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
     echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
     echo ""
 
-    # Restart loop — if opencode or ttyd exits, restart after 3s.
+    # Restart loop with exponential backoff on consecutive failures.
+    _fail_count=0
     while true; do
         ttyd \
             --port "${OPENCODE_PORT:-3000}" \
@@ -451,11 +479,14 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
             --cwd /workspace \
             -t titleFixed="${OPENCODE_TITLE:-OpenCode (tui)}" \
             ${OPENCODE_TUI_ARGS:-} \
-            "${OPENCODE_BIN_PATH}" ${OPENCODE_EXTRA_ARGS:-} || true
+            "${OPENCODE_BIN_PATH}" ${OPENCODE_EXTRA_ARGS:-}
+        _rc=$?
+        if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
+        _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))
         echo ""
-        echo "  ⟳ ttyd exited ($(date)). Restarting in 3s..."
+        echo "  ⟳ ttyd exited (rc=${_rc}). Restart #${_fail_count} in ${_sleep}s..."
         echo ""
-        sleep 3
+        sleep "${_sleep}"
     done
 
 else
@@ -464,16 +495,20 @@ else
     echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
     echo ""
 
+    _fail_count=0
     while true; do
         "${OPENCODE_BIN_PATH}" web \
             --hostname 0.0.0.0 \
             --port "${OPENCODE_PORT:-3000}" \
-            ${OPENCODE_EXTRA_ARGS:-} || true
+            ${OPENCODE_EXTRA_ARGS:-}
+        _rc=$?
+        if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
+        _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))
         echo ""
-        echo "  ⟳ opencode web exited ($(date)). Restarting in 3s..."
+        echo "  ⟳ opencode web exited (rc=${_rc}). Restart #${_fail_count} in ${_sleep}s..."
         echo ""
 
         _restart_proxy
-        sleep 3
+        sleep "${_sleep}"
     done
 fi
