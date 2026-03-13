@@ -64,6 +64,7 @@ _agent_color() {
 
 # ─── Format millisecond timestamp to HH:MM:SS (local time) ───────
 _fmt_time() {
+    [[ "$1" =~ ^[0-9]+$ ]] || { echo "??:??:??"; return; }
     local ms="$1"
     local secs=$(( ms / 1000 ))
     date -d "@${secs}" '+%H:%M:%S' 2>/dev/null || echo "??:??:??"
@@ -71,6 +72,7 @@ _fmt_time() {
 
 # ─── Format duration in ms to human-readable ─────────────────────
 _fmt_duration() {
+    [[ "$1" =~ ^[0-9]+$ ]] || { echo "?"; return; }
     local ms="$1"
     local secs=$(( ms / 1000 ))
     if [ "$secs" -lt 60 ]; then
@@ -107,6 +109,7 @@ _print_header() {
 _query_subagents() {
     local startup_ts
     startup_ts=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
+    [[ "$startup_ts" =~ ^[0-9]+$ ]] || startup_ts=0
     sqlite3 -separator $'\t' "$DB" "
         SELECT
             s.id,
@@ -123,7 +126,7 @@ _query_subagents() {
             SELECT
                 m.session_id,
                 json_extract(m.data, '$.agent') as agent,
-                json_extract(m.data, '$.model.modelID') as model
+                json_extract(m.data, '$.modelID') as model
             FROM message m
             INNER JOIN (
                 SELECT session_id, MIN(rowid) as min_rowid
@@ -163,6 +166,7 @@ _query_subagents() {
 # ─── Query token usage for a completed session ───────────────────
 # Returns TSV: total_input  total_output  total_cache_read
 _query_tokens() {
+    [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || return
     local sid="$1"
     sqlite3 -separator $'\t' "$DB" "
         SELECT
@@ -196,6 +200,8 @@ _print_done() {
     local sid="$1" agent="$2" tcreated="$3" last_msg_time="$4" error_name="$5"
     local color
     color=$(_agent_color "$agent")
+    [[ "$tcreated" =~ ^[0-9]+$ ]] || tcreated=0
+    [[ "$last_msg_time" =~ ^[0-9]+$ ]] || last_msg_time="$tcreated"
     local duration=$(( last_msg_time - tcreated ))
     local dur_str
     dur_str=$(_fmt_duration "$duration")
@@ -228,6 +234,7 @@ _print_done() {
 
 # ─── Parse a tracked session record ──────────────────────────────
 # Format: agent|model|time_created|status|msg_count|last_msg_time|finish|error_name|completed
+# Note: sets global _s_* variables — must be called in main shell, not subshells.
 _parse_session() {
     local entry="$1"
     _s_agent="" _s_model="" _s_tcreated="" _s_status="" _s_msg_count="" _s_last_msg="" _s_finish="" _s_error_name="" _s_completed=""
@@ -244,9 +251,7 @@ main() {
     # ── Wait for DB readiness ────────────────────────────────────
     local db_ok=false
     for attempt in 1 2 3 4 5; do
-        local db_test
-        db_test=$(sqlite3 "$DB" "SELECT COUNT(*) FROM session" 2>&1)
-        if [ -n "$db_test" ] && [[ "$db_test" != *"error"* ]] && [[ "$db_test" != *"Error"* ]]; then
+        if sqlite3 "$DB" "SELECT COUNT(*) FROM session" >/dev/null 2>&1; then
             db_ok=true
             break
         fi
@@ -317,6 +322,7 @@ main() {
     echo ""
 
     # ── Poll loop ─────────────────────────────────────────────────
+    declare -A current_ids
     while true; do
         sleep "$POLL_INTERVAL"
 
@@ -324,7 +330,7 @@ main() {
         new_data=$(_query_subagents)
 
         # Build a set of current session IDs from the query
-        declare -A current_ids
+        current_ids=()
 
         now_ms=$(date +%s%3N 2>/dev/null || echo "0")
 
@@ -349,6 +355,7 @@ main() {
                     known_sessions["$sid"]="${agent}|${model}|${tcreated}|done|${msg_count}|${last_msg_time}|${finish}|${error_name}|${completed}"
                 else
                     # Safety net: no completion signal but idle too long
+                    [[ "$last_msg_time" =~ ^[0-9]+$ ]] || last_msg_time=0
                     local idle_ms=$(( now_ms - last_msg_time ))
                     if [ "$idle_ms" -gt "$SAFETY_TIMEOUT_MS" ]; then
                         _print_done "$sid" "$agent" "$tcreated" "$last_msg_time" "(timeout)"
@@ -371,8 +378,6 @@ main() {
                 known_sessions["$sid"]="${_s_agent}|${_s_model}|${_s_tcreated}|done|${_s_msg_count}|${_s_last_msg}|${_s_finish}|${_s_error_name}|${_s_completed}"
             fi
         done
-
-        unset current_ids
     done
 }
 

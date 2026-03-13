@@ -26,7 +26,9 @@ fi
 SAFETY_TIMEOUT_MS=120000
 
 now_ms=$(date +%s%3N 2>/dev/null || echo "0")
+[[ "$now_ms" =~ ^[0-9]+$ ]] || now_ms=0
 STARTUP_TS=$(cat /tmp/.opencode-startup-ts 2>/dev/null || echo "0")
+[[ "$STARTUP_TS" =~ ^[0-9]+$ ]] || STARTUP_TS=0
 
 # Query active subagent sessions (only from current container lifecycle).
 # Uses a pre-aggregated subquery instead of correlated subqueries for speed.
