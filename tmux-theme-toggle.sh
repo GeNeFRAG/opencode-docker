@@ -19,7 +19,7 @@ current="${current:-dark}"
 
 if [ "$current" = "dark" ]; then
     next="light"
-    osc_bg="#e1e2e7"
+    osc_bg="#d5d6db"
     osc_fg="#3760bf"
     osc_cursor="#2e7de9"
 else

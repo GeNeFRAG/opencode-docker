@@ -454,7 +454,7 @@ else
     _init_theme=$(cat /tmp/.tmux-theme 2>/dev/null || echo "dark")
     if [ "$_init_theme" = "light" ]; then
         printf '\e]10;#3760bf\a'    # OSC 10: foreground
-        printf '\e]11;#e1e2e7\a'    # OSC 11: background
+        printf '\e]11;#d5d6db\a'    # OSC 11: background
         printf '\e]12;#2e7de9\a'    # OSC 12: cursor
     fi
 
