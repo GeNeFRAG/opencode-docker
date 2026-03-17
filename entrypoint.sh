@@ -312,6 +312,19 @@ else
 fi
 echo ""
 
+# ─── Refresh model cache in the background (best-effort) ──────────
+# opencode caches provider model lists locally. After a container rebuild
+# the cache may be stale, causing ProviderModelNotFoundError for newly
+# available models. Refresh asynchronously so it doesn't delay startup.
+if [ -x "${OPENCODE_BIN_PATH:-}" ]; then
+    (
+        "${OPENCODE_BIN_PATH}" models --refresh >/dev/null 2>&1 \
+            && echo "  ✓ Model cache refreshed" \
+            || echo "  ⚠ Model cache refresh failed (non-fatal)"
+    ) &
+    echo "→ Refreshing model cache in background..."
+fi
+
 # ─── Record startup timestamp (ms) for status bar freshness ───────
 # Status scripts use this to ignore sessions from previous container
 # lifecycles — avoids showing stale model/token data after a rebuild.

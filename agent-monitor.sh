@@ -215,6 +215,9 @@ _print_done() {
     elif [ "$error_name" = "(timeout)" ]; then
         status_icon="■"
         status_label="timeout"
+    elif [ "$error_name" = "ProviderModelNotFoundError" ]; then
+        status_icon="⚠"
+        status_label="model not found"
     elif [ -n "$error_name" ]; then
         status_icon="⚠"
         status_label="error"
