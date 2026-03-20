@@ -170,6 +170,7 @@
         "-e", "JIRA_USERNAME",
         "-e", "JIRA_PERSONAL_TOKEN",
         "-e", "JIRA_SSL_VERIFY",
+        "-e", "TOOLSETS",
         "ghcr.io/sooperset/mcp-atlassian:latest"
       ],
       "environment": {
@@ -180,7 +181,8 @@
         "JIRA_URL": "${JIRA_URL}",
         "JIRA_USERNAME": "${JIRA_USERNAME}",
         "JIRA_SSL_VERIFY": "false",
-        "JIRA_PERSONAL_TOKEN": "${JIRA_TOKEN}"
+        "JIRA_PERSONAL_TOKEN": "${JIRA_TOKEN}",
+        "TOOLSETS": "${ATLASSIAN_TOOLSETS}"
       }
     },
     "grafana": {
