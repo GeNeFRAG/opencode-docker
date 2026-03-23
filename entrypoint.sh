@@ -636,7 +636,7 @@ else
 
     COLS=$(tput cols  2>/dev/null || echo 180)
     ROWS=$(tput lines 2>/dev/null || echo 50)
-    tmux -u new-session -d -s "$TMUX_SESSION" -x "$COLS" -y "$ROWS" -c /workspace \
+    tmux -u new-session -d -s "$TMUX_SESSION" -n "$(basename "$APP_BIN")" -x "$COLS" -y "$ROWS" -c /workspace \
         "/tmp/tmux-wrapper.sh --loop"
     tmux source-file "${TMUX_THEME_DIR}/tmux-theme-${_init_theme}.conf" 2>/dev/null
     exec tmux -u attach -t "$TMUX_SESSION"
