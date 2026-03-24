@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 
 const UPSTREAM_URL = process.env.UPSTREAM_URL;
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "18080", 10);
+const PROXY_TIMEOUT = parseInt(process.env.PROXY_TIMEOUT || "120", 10) * 1000; // seconds → ms
 const LOG_LEVEL = (process.env.PROXY_LOG_LEVEL || "info").toLowerCase(); // debug | info | warn | error
 
 if (!UPSTREAM_URL) {
@@ -156,7 +157,22 @@ function trackUpstreamConnect(proxyReq, id) {
 
 /* ── Shared upstream handlers ──────────────────────────────────────── */
 
-function handleUpstreamResponse(proxyRes, res, id, startTime) {
+/**
+ * Per-request context to prevent double-decrementing activeRequests.
+ * Multiple error paths (proxyRes error, proxyReq error, timeout) can fire
+ * for the same request; only the first one should decrement the counter.
+ */
+function makeRequestCtx() {
+  return { settled: false };
+}
+function settle(ctx) {
+  if (ctx.settled) return false;
+  ctx.settled = true;
+  activeRequests--;
+  return true;
+}
+
+function handleUpstreamResponse(proxyRes, res, id, startTime, ctx) {
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
   const status = proxyRes.statusCode;
   const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
@@ -169,31 +185,47 @@ function handleUpstreamResponse(proxyRes, res, id, startTime) {
   proxyRes.pipe(res);
 
   proxyRes.on("end", () => {
-    activeRequests--;
+    settle(ctx);
     const total = ((performance.now() - startTime) / 1000).toFixed(2);
     log.info(`[${id}] Completed in ${total}s (active=${activeRequests})`);
   });
+  proxyRes.on("error", () => {
+    settle(ctx);
+  });
 }
 
-function handleTimeout(proxyReq, id) {
-  log.error(`[${id}] Upstream timeout after 300s`);
-  proxyReq.destroy(new Error("Upstream timeout (300s)"));
+function handleTimeout(proxyReq, res, id) {
+  const timeoutSec = PROXY_TIMEOUT / 1000;
+  log.error(`[${id}] Upstream timeout after ${timeoutSec}s`);
+  proxyReq.destroy(new Error(`Upstream timeout (${timeoutSec}s)`));
+  // If headers were already sent (mid-stream timeout), destroy the client
+  // connection so OpenCode gets a socket error instead of silently waiting.
+  if (res.headersSent && !res.writableEnded) {
+    log.error(`[${id}] Destroying client connection (headers already sent — mid-stream timeout)`);
+    res.destroy();
+  }
 }
 
-function handleProxyError(err, res, id, startTime) {
-  activeRequests--;
+function handleProxyError(err, res, id, startTime, ctx) {
+  settle(ctx);
   totalErrors++;
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
   log.error(`[${id}] Upstream error after ${elapsed}s: ${err.message}`);
   if (!res.headersSent) {
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }));
+  } else if (!res.writableEnded) {
+    // Mid-stream error: headers already sent, can't send a clean error response.
+    // Destroy the socket so the client gets a connection reset instead of hanging.
+    log.error(`[${id}] Destroying client connection (mid-stream upstream error)`);
+    res.destroy();
   }
 }
 
-function handleClientDisconnect(proxyReq, id) {
+function handleClientDisconnect(proxyReq, id, ctx) {
   if (!proxyReq.destroyed) {
     log.warn(`[${id}] Client disconnected, aborting upstream request`);
+    settle(ctx);
     proxyReq.destroy();
   }
 }
@@ -225,7 +257,7 @@ const server = http.createServer((req, res) => {
     headers: fwdHeaders,
     agent,
     rejectUnauthorized: true,
-    timeout: 300_000,
+    timeout: PROXY_TIMEOUT,
   };
 
   /**
@@ -235,15 +267,16 @@ const server = http.createServer((req, res) => {
   if (!isChatCompletion) {
     log.debug(`[${id}] Passthrough (not chat/completions)`);
 
+    const ctx = makeRequestCtx();
     const proxyReq = transport.request(
       targetUrl,
       reqOpts,
-      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime)
+      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime, ctx)
     );
 
-    proxyReq.on("timeout", () => handleTimeout(proxyReq, id));
-    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime));
-    res.on("close", () => handleClientDisconnect(proxyReq, id));
+    proxyReq.on("timeout", () => handleTimeout(proxyReq, res, id));
+    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime, ctx));
+    res.on("close", () => handleClientDisconnect(proxyReq, id, ctx));
 
     trackUpstreamConnect(proxyReq, id);
     req.pipe(proxyReq);
@@ -283,15 +316,16 @@ const server = http.createServer((req, res) => {
 
     log.info(`[${id}] Body: ${(rawBody.length / 1024).toFixed(1)}KB${modified ? " (modified)" : ""}`);
 
+    const ctx = makeRequestCtx();
     const proxyReq = transport.request(
       targetUrl,
       reqOpts,
-      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime)
+      (proxyRes) => handleUpstreamResponse(proxyRes, res, id, startTime, ctx)
     );
 
-    proxyReq.on("timeout", () => handleTimeout(proxyReq, id));
-    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime));
-    res.on("close", () => handleClientDisconnect(proxyReq, id));
+    proxyReq.on("timeout", () => handleTimeout(proxyReq, res, id));
+    proxyReq.on("error", (err) => handleProxyError(err, res, id, startTime, ctx));
+    res.on("close", () => handleClientDisconnect(proxyReq, id, ctx));
 
     trackUpstreamConnect(proxyReq, id);
     proxyReq.end(rawBody);
@@ -313,6 +347,7 @@ server.headersTimeout = 65_000;   // must be > keepAliveTimeout
 server.listen(PROXY_PORT, "127.0.0.1", () => {
   log.info(`Listening on http://127.0.0.1:${PROXY_PORT} -> ${UPSTREAM_URL}`);
   log.info(`Log level: ${LOG_LEVEL} (set PROXY_LOG_LEVEL=debug for verbose output)`);
+  log.info(`Upstream timeout: ${PROXY_TIMEOUT / 1000}s (set PROXY_TIMEOUT=<seconds> to change)`);
   log.info(`Keep-alive: upstream pool maxSockets=16 maxFreeSockets=8`);
 });
 
