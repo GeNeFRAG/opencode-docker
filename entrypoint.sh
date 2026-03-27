@@ -69,7 +69,7 @@ CONFIG_FILE="${CONFIG_DIR}/opencode.json"
 
 # ─── Reusable config generation (called on startup + proxy fallback) ─
 _generate_config() {
-    envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH} ${ATLASSIAN_TOOLSETS}' \
+    envsubst '${LLM_EFFECTIVE_URL} ${LLM_BASE_URL} ${LLM_API_KEY} ${OPENROUTER_API_KEY} ${OPENCODE_MODEL} ${OPENCODE_TUI_THEME} ${GITHUB_ENTERPRISE_TOKEN} ${GITHUB_ENTERPRISE_URL} ${GITHUB_PERSONAL_TOKEN} ${CONFLUENCE_URL} ${CONFLUENCE_USERNAME} ${CONFLUENCE_TOKEN} ${JIRA_URL} ${JIRA_USERNAME} ${JIRA_TOKEN} ${GRAFANA_URL} ${GRAFANA_API_KEY} ${CA_CERT_PATH} ${ATLASSIAN_TOOLSETS}' \
         < "${TEMPLATE}" > "${CONFIG_FILE}"
     chmod 600 "${CONFIG_FILE}"
     if [ ! -s "${CONFIG_FILE}" ]; then
@@ -248,6 +248,10 @@ else
     else
         export LLM_EFFECTIVE_URL="${LLM_BASE_URL}"
     fi
+
+    # Default TUI theme if not set (OpenCode built-in themes: opencode,
+    # catppuccin, dracula, tokyonight, gruvbox, monokai, flexoki, etc.)
+    export OPENCODE_TUI_THEME="${OPENCODE_TUI_THEME:-opencode}"
 
     _generate_config
     echo "  ✓ Config written to ${CONFIG_FILE}"
