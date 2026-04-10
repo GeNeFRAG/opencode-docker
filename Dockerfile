@@ -173,6 +173,7 @@ COPY tmux-theme-light.conf /opt/opencode/tmux-theme-light.conf
 
 # ─── Entrypoint and config ────────────────────────────────────────
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY lib/ /opt/opencode/lib/
 COPY opencode.json.template /opt/opencode/opencode.json.template
 COPY claude-code.mcp.json.template /opt/opencode/claude-code.mcp.json.template
 COPY flowcode.mcp.json.template /opt/opencode/flowcode.mcp.json.template
