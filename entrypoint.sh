@@ -176,6 +176,48 @@ SETTINGS
     fi
 }
 
+# ─── FlowCode config generation ───────────────────────────────────
+_generate_flowcode_config() {
+    local config_dir="/root/.config/flowcode"
+    local config_file="${config_dir}/config.json"
+    local creds_file="${config_dir}/credentials.json"
+
+    mkdir -p "${config_dir}"
+
+    # 1. Generate config.json (MCP servers can be added via FlowCode's web UI)
+    echo '{}' > "${config_file}"
+    chmod 600 "${config_file}"
+    echo "  ✓ FlowCode config written to ${config_file}"
+
+    # 2. Generate credentials.json (map LLM_API_KEY/LLM_BASE_URL to FlowCode format)
+    local auth_token="${ANTHROPIC_AUTH_TOKEN:-${LLM_API_KEY:-}}"
+    local base_url="${ANTHROPIC_BASE_URL:-${LLM_BASE_URL:-}}"
+
+    if [ -n "${auth_token}" ] && [ -n "${base_url}" ]; then
+        jq -n --arg token "${auth_token}" --arg url "${base_url}" \
+            '{"anthropicToken": $token, "anthropicBaseUrl": $url}' \
+            > "${creds_file}"
+        chmod 600 "${creds_file}"
+        echo "  ✓ FlowCode credentials configured (gateway: ${base_url})"
+    elif [ -n "${auth_token}" ]; then
+        jq -n --arg token "${auth_token}" \
+            '{"anthropicToken": $token}' > "${creds_file}"
+        chmod 600 "${creds_file}"
+        echo "  ⚠ FlowCode credentials: token set but no base URL — will use default gateway"
+    else
+        echo "  ⚠ No auth token set — configure credentials via FlowCode's web UI settings"
+    fi
+
+    # 3. Map GitHub token for git operations in FlowCode's terminal
+    if [ -n "${GITHUB_ENTERPRISE_TOKEN:-}" ]; then
+        export GH_TOKEN="${GITHUB_ENTERPRISE_TOKEN}"
+        echo "  ✓ GH_TOKEN mapped from GITHUB_ENTERPRISE_TOKEN"
+    elif [ -n "${GITHUB_PERSONAL_TOKEN:-}" ]; then
+        export GH_TOKEN="${GITHUB_PERSONAL_TOKEN}"
+        echo "  ✓ GH_TOKEN mapped from GITHUB_PERSONAL_TOKEN"
+    fi
+}
+
 # ─── Cleanup on SIGTERM (reap background proxy) ───────────────────
 _cleanup() {
     [ -n "${PROXY_PID:-}" ] && kill "${PROXY_PID}" 2>/dev/null
@@ -187,8 +229,15 @@ trap _cleanup SIGTERM SIGINT
 # OPENCODE_APP selects which coding agent to run:
 #   opencode    (default) — OpenCode AI agent
 #   claude-code           — Anthropic Claude Code agent
+#   flowcode              — FlowCode (RBI) AI agent — web mode only
 OPENCODE_APP="${OPENCODE_APP:-opencode}"
-APP_TITLE_PREFIX=$( [ "${OPENCODE_APP}" = "claude-code" ] && echo "Claude Code" || echo "OpenCode" )
+if [ "${OPENCODE_APP}" = "claude-code" ]; then
+    APP_TITLE_PREFIX="Claude Code"
+elif [ "${OPENCODE_APP}" = "flowcode" ]; then
+    APP_TITLE_PREFIX="FlowCode"
+else
+    APP_TITLE_PREFIX="OpenCode"
+fi
 
 # Resolve CA_CERT_PATH to the absolute host path for sibling Docker containers.
 # Compose mounts CA_CERT_PATH → /certs/ca-bundle.pem inside this container,
@@ -215,6 +264,14 @@ if [ "${OPENCODE_APP}" = "claude-code" ]; then
     echo "→ Configuring Claude Code..."
     export PREFILL_PROXY_ENABLED=false
     _generate_claude_code_config
+
+elif [ "${OPENCODE_APP}" = "flowcode" ]; then
+    # ═══════════════════════════════════════════════════════════════
+    # FlowCode path — generates FlowCode config + credentials
+    # ═══════════════════════════════════════════════════════════════
+    echo "→ Configuring FlowCode..."
+    export PREFILL_PROXY_ENABLED=false
+    _generate_flowcode_config
 
 else
     # ═══════════════════════════════════════════════════════════════
@@ -522,6 +579,33 @@ if [ "${OPENCODE_APP}" = "claude-code" ]; then
     echo "╚══════════════════════════════════════════╝"
     echo ""
 
+elif [ "${OPENCODE_APP}" = "flowcode" ]; then
+    # FlowCode binary
+    FLOWCODE_BIN="/usr/local/bin/flowcode-server"
+    if [ -x "${FLOWCODE_BIN}" ]; then
+        export APP_BIN="${FLOWCODE_BIN}"
+        echo "  ✓ flowcode-server binary: ${FLOWCODE_BIN}"
+    else
+        echo "  ✗ FATAL: flowcode-server binary not found at ${FLOWCODE_BIN}"
+        exit 1
+    fi
+
+    # FlowCode runtime environment
+    export PORT="${OPENCODE_PORT:-3000}"
+    export FLOWCODE_STATIC_DIR="/opt/flowcode/public"
+    export FLOWCODE_FILE_ROOT="/workspace"
+    export FLOWCODE_LOCAL=1
+    export NODE_ENV=production
+    export SHELL=/bin/bash
+    # Map auth env vars to FlowCode's expected format
+    [ -n "${LLM_API_KEY:-}" ] && export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-${LLM_API_KEY}}"
+    [ -n "${LLM_BASE_URL:-}" ] && export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-${LLM_BASE_URL}}"
+
+    echo "╔══════════════════════════════════════════╗"
+    echo "║       FlowCode - Docker Container        ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo ""
+
 else
     # OpenCode binary (default)
     OPENCODE_STABLE_BIN="/usr/local/bin/opencode-go"
@@ -563,6 +647,12 @@ if [ "${OPENCODE_APP}" = "opencode" ] && [ -x "${OPENCODE_BIN_PATH:-}" ]; then
             || echo "  ⚠ Model cache refresh failed (non-fatal)"
     ) &
     echo "→ Refreshing model cache in background..."
+fi
+
+# ─── FlowCode mode guard (web-only) ──────────────────────────────
+if [ "${OPENCODE_APP}" = "flowcode" ] && [ "${OPENCODE_MODE}" != "web" ]; then
+    echo "  ⚠ FlowCode only supports web mode — overriding OPENCODE_MODE=${OPENCODE_MODE} → web"
+    OPENCODE_MODE="web"
 fi
 
 if [ "${OPENCODE_MODE}" = "tmux" ]; then
@@ -739,11 +829,28 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
     done
 
 else
-    # ── Web mode (default): opencode web UI ──────────────────────
-    # Web mode is only supported for OpenCode
+    # ── Web mode (default) ───────────────────────────────────────
     if [ "${OPENCODE_APP}" = "claude-code" ]; then
         echo "  ✗ FATAL: web mode is not supported for Claude Code — use tui or tmux"
         exit 1
+    fi
+
+    if [ "${OPENCODE_APP}" = "flowcode" ]; then
+        echo "→ Starting FlowCode web on 0.0.0.0:${OPENCODE_PORT:-3000}..."
+        echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
+        echo ""
+
+        _fail_count=0
+        while true; do
+            "${APP_BIN}"
+            _rc=$?
+            if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
+            _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))
+            echo ""
+            echo "  ⟳ FlowCode exited (rc=${_rc}). Restart #${_fail_count} in ${_sleep}s..."
+            echo ""
+            sleep "${_sleep}"
+        done
     fi
 
     echo "→ Starting opencode web on 0.0.0.0:${OPENCODE_PORT:-3000}..."
