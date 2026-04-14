@@ -1,7 +1,23 @@
 # ═══════════════════════════════════════════════════════════════════
+# Dockerfile.rbi — RBI-internal build (requires Artifactory access)
+#
+# Extends the public Dockerfile with the FlowCode stage, which pulls
+# from artifacts.rbi.tech/dtr-docker-host/flowcode.
+#
+# External / personal-GitHub users: use the public Dockerfile instead.
+# RBI users: point to this file in docker-compose.override.yml:
+#
+#   services:
+#     my-service:
+#       build:
+#         dockerfile: Dockerfile.rbi
+# ═══════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════
 # Build stage: has build-essential for native npm modules
 # ═══════════════════════════════════════════════════════════════════
 # Global build args (declared before first FROM for cross-stage visibility)
+ARG FLOWCODE_VERSION=latest
 
 FROM node:22-bookworm-slim AS builder
 
@@ -48,6 +64,11 @@ RUN npm install -g \
     mcp-time-server@1.0.1 \
     @playwright/mcp@0.0.68 \
     @cyanheads/git-mcp-server@2.8.4
+
+# ═══════════════════════════════════════════════════════════════════
+# FlowCode stage: extract pre-built binary + SPA from official image
+# ═══════════════════════════════════════════════════════════════════
+FROM artifacts.rbi.tech/dtr-docker-host/flowcode:${FLOWCODE_VERSION} AS flowcode
 
 # ═══════════════════════════════════════════════════════════════════
 # Runtime stage: slim, no build tools
@@ -117,6 +138,11 @@ COPY --from=builder /root/.config/opencode/node_modules /root/.config/opencode/n
 COPY --from=builder /root/.config/opencode/package.json /root/.config/opencode/package.json
 COPY --from=builder /root/.npm /root/.npm
 
+# ─── FlowCode binary + SPA + bun-pty ──────────────────────────────
+COPY --from=flowcode /usr/local/bin/flowcode-server /usr/local/bin/flowcode-server
+COPY --from=flowcode /app/public /opt/flowcode/public
+COPY --from=flowcode /app/node_modules/bun-pty /opt/flowcode/bun-pty
+
 # ─── Plugin config (oh-my-opencode-slim) ───────────────────────────
 # Baked into the image; override at runtime via docker-compose volume mount.
 COPY templates/oh-my-opencode-slim.json.template /root/.config/opencode/oh-my-opencode-slim.json
@@ -128,6 +154,7 @@ COPY templates/oh-my-opencode-slim.json.template /root/.config/opencode/oh-my-op
 # /usr/local/bin/opencode-go is immune to npm/bun operations.
 RUN cp /usr/local/lib/node_modules/opencode-ai/bin/.opencode /usr/local/bin/opencode-go && \
     chmod +x /usr/local/bin/opencode-go && \
+    chmod +x /usr/local/bin/flowcode-server && \
     ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode && \
     ln -sf /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js /usr/local/bin/claude && \
     ln -sf ../lib/node_modules/@modelcontextprotocol/server-memory/dist/index.js /usr/local/bin/mcp-server-memory && \
@@ -141,6 +168,7 @@ RUN cp /usr/local/lib/node_modules/opencode-ai/bin/.opencode /usr/local/bin/open
 RUN mkdir -p /workspace \
     /root/.local/share/opencode \
     /root/.config/opencode/skills \
+    /root/.config/flowcode \
     /root/.agents/skills \
     /root/.claude
 

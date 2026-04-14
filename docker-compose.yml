@@ -9,10 +9,13 @@
 x-opencode-common: &opencode-common
   build:
     context: .
-    dockerfile: Dockerfile
+    # Public build (default) — no FlowCode support.
+    # RBI users who need OPENCODE_APP=flowcode: pass --dockerfile Dockerfile.rbi
+    # to opencode-web.sh, or override dockerfile in docker-compose.override.yml
+    # (see docker-compose.override.yml.example).
+    dockerfile: ${DOCKERFILE:-Dockerfile}
     args:
       OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
-      FLOWCODE_VERSION: ${FLOWCODE_VERSION:-latest}
     secrets:
       - ca-cert
   restart: unless-stopped

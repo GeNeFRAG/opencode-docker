@@ -9,6 +9,18 @@ if [ -f "${SCRIPT_DIR}/docker-compose.override.yml" ]; then
     COMPOSE="${COMPOSE} -f ${SCRIPT_DIR}/docker-compose.override.yml"
 fi
 
+# ─── --dockerfile / -d flag (optional) ────────────────────────────
+# Override the Dockerfile used for build commands.
+# E.g.: ./opencode-web.sh --dockerfile Dockerfile.rbi start
+if [ "${1:-}" = "--dockerfile" ] || [ "${1:-}" = "-d" ]; then
+    if [ -z "${2:-}" ]; then
+        echo "Error: --dockerfile requires a filename argument"
+        exit 1
+    fi
+    export DOCKERFILE="${2}"
+    shift 2
+fi
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -49,13 +61,17 @@ _preflight() {
 }
 
 usage() {
-    echo "Usage: $0 <command> [service...]"
+    echo "Usage: $0 [--dockerfile <file>] <command> [service...]"
+    echo ""
+    echo "Options:"
+    echo "  --dockerfile, -d <file>   Dockerfile to build from (default: Dockerfile)"
+    echo "                            Use 'Dockerfile.rbi' for FlowCode (RBI Artifactory required)"
     echo ""
     echo "Commands:"
     echo "  start [svc...]    Build and start services (default: all)"
     echo "  stop [svc...]     Stop services (default: all)"
     echo "  restart [svc...]  Restart services"
-    echo "  logs [svc]        Show logs (follow)"
+    echo "  logs [svc]        Follow logs"
     echo "  shell <svc>       Open a shell in a service"
     echo "  rebuild [svc...]  Force rebuild and start"
     echo "  down              Stop and remove all containers"
@@ -67,10 +83,12 @@ usage() {
     echo "Services are defined in docker-compose.yml and docker-compose.override.yml"
     echo ""
     echo "Examples:"
-    echo "  $0 start                   # Start all repos"
-    echo "  $0 start opencode-docker   # Start only this repo"
-    echo "  $0 logs opencode-docker    # Follow logs"
-    echo "  $0 shell opencode-docker   # Bash into container"
+    echo "  $0 start                                    # Start all repos"
+    echo "  $0 start opencode-docker                    # Start only this repo"
+    echo "  $0 --dockerfile Dockerfile.rbi start        # Start with FlowCode (RBI only)"
+    echo "  $0 -d Dockerfile.rbi rebuild opencode-docker"
+    echo "  $0 logs opencode-docker                     # Follow logs"
+    echo "  $0 shell opencode-docker                    # Bash into container"
     echo ""
 }
 

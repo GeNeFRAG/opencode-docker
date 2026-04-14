@@ -132,6 +132,46 @@ services:
   #     - ${HOST_AUTH_JSON:-.docker/empty-file}:/opt/opencode/host-auth.json:ro
 
   # ─────────────────────────────────────────────────────────────
+  # Example: FlowCode on my-project — http://localhost:3005
+  #
+  # FlowCode is an RBI-internal product. It requires building with
+  # Dockerfile.rbi, which pulls from the RBI Artifactory registry
+  # (artifacts.rbi.tech/dtr-docker-host/flowcode).
+  # Only available to users with RBI Artifactory access.
+  # ─────────────────────────────────────────────────────────────
+  # flowcode-my-project:
+  #   extends:
+  #     file: docker-compose.yml
+  #     service: opencode-docker
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.rbi
+  #     args:
+  #       FLOWCODE_VERSION: ${FLOWCODE_VERSION:-latest}
+  #   container_name: flowcode-my-project
+  #   ports:
+  #     !override
+  #     - "3005:3005"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:3005/"]
+  #   environment:
+  #     !override
+  #     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
+  #     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
+  #     - OPENCODE_APP=flowcode
+  #     - OPENCODE_PORT=3005
+  #   volumes:
+  #     !override
+  #     - ${REPOS_PATH:-~/repos}/my-project:/workspace
+  #     - flowcode-data-my-project:/var/flowcode/workspaces
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - ./.env:/opt/opencode/.env:ro
+  #     - ${HOME}/.ssh:/root/.ssh:ro
+  #     - ${HOME}/.gitconfig:/root/.gitconfig:ro
+  #     - ${GIT_CREDENTIALS_PATH:-.docker/empty-file}:/root/.git-credentials:ro
+  #     - ${CA_CERT_PATH:-.docker/empty-file}:/certs/ca-bundle.pem:ro
+
+  # ─────────────────────────────────────────────────────────────
   # Example: Claude Code on my-project — http://localhost:3004
   #
   # Uses Anthropic Claude Code instead of OpenCode.
@@ -189,3 +229,5 @@ volumes:
   #   name: claude-code-data-my-project
   # opencode-memory-claude-my-project:
   #   name: opencode-memory-claude-my-project
+  # flowcode-data-my-project:
+  #   name: flowcode-data-my-project

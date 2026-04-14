@@ -36,6 +36,11 @@ elif [ "${OPENCODE_APP}" = "flowcode" ]; then
         echo "  ✓ flowcode-server binary: ${FLOWCODE_BIN}"
     else
         echo "  ✗ FATAL: flowcode-server binary not found at ${FLOWCODE_BIN}"
+        echo "    FlowCode is an RBI-internal product and requires building with"
+        echo "    Dockerfile.rbi, which pulls from the RBI Artifactory registry."
+        echo "    If you have Artifactory access, rebuild with:"
+        echo "      docker compose build --build-arg dockerfile=Dockerfile.rbi"
+        echo "    Or set 'dockerfile: Dockerfile.rbi' in your docker-compose.override.yml."
         exit 1
     fi
 
