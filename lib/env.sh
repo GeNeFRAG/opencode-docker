@@ -27,7 +27,7 @@ _load_env_file() {
 }
 
 # Snapshot the port before loading so we can detect changes
-_ORIG_PORT="${OPENCODE_PORT:-}"
+_ORIG_PORT="${CODEBOX_PORT:-}"
 
 if [ -f /opt/opencode/.env ] && [ -s /opt/opencode/.env ]; then
     _load_env_file /opt/opencode/.env
@@ -39,14 +39,36 @@ else
     echo "→ No .env file found (using container environment)"
 fi
 
+# ─── Deprecation shim: map old OPENCODE_* shared vars to CODEBOX_* ─
+_migrate_var() {
+    local old="$1" new="$2"
+    if [[ -n "${!old:-}" && -z "${!new:-}" ]]; then
+        export "$new=${!old}"
+        echo "  WARNING: $old is deprecated, use $new instead" >&2
+    fi
+}
+_migrate_var OPENCODE_APP                       CODEBOX_APP
+_migrate_var OPENCODE_MODE                      CODEBOX_MODE
+_migrate_var OPENCODE_PORT                      CODEBOX_PORT
+_migrate_var OPENCODE_TITLE                     CODEBOX_TITLE
+_migrate_var OPENCODE_THEME                     CODEBOX_THEME
+_migrate_var OPENCODE_TLS                       CODEBOX_TLS
+_migrate_var OPENCODE_TLS_CERT                  CODEBOX_TLS_CERT
+_migrate_var OPENCODE_TLS_KEY                   CODEBOX_TLS_KEY
+_migrate_var OPENCODE_EXTRA_ARGS                CODEBOX_EXTRA_ARGS
+_migrate_var OPENCODE_TUI_ARGS                  CODEBOX_TUI_ARGS
+_migrate_var OPENCODE_VERSION                   CODEBOX_VERSION
+_migrate_var OPENCODE_ENABLE_EXPERIMENTAL_MODELS CODEBOX_ENABLE_EXPERIMENTAL_MODELS
+_migrate_var CACHEBUST_OPENCODE                 CACHEBUST_CODEBOX
+
 # ─── Warn about non-reloadable changes ─────────────────────────────
-if [ "${OPENCODE_PORT:-}" != "${_ORIG_PORT}" ]; then
+if [ "${CODEBOX_PORT:-}" != "${_ORIG_PORT}" ]; then
     if [ -n "${_ORIG_PORT}" ]; then
-        echo "  ⚠ OPENCODE_PORT changed (${_ORIG_PORT} → ${OPENCODE_PORT}) — requires 'docker compose up' or './opencode-web.sh rebuild' to take effect"
-        export OPENCODE_PORT="${_ORIG_PORT}"
+        echo "  WARNING: CODEBOX_PORT changed (${_ORIG_PORT} → ${CODEBOX_PORT}) — requires 'docker compose up' or './codebox.sh rebuild' to take effect"
+        export CODEBOX_PORT="${_ORIG_PORT}"
     else
-        echo "  ⚠ OPENCODE_PORT set to ${OPENCODE_PORT} via .env but port mapping was not configured at container creation — requires 'docker compose up' to take effect"
-        unset OPENCODE_PORT
+        echo "  WARNING: CODEBOX_PORT set to ${CODEBOX_PORT} via .env but port mapping was not configured at container creation — requires 'docker compose up' to take effect"
+        unset CODEBOX_PORT
     fi
 fi
 unset _ORIG_PORT

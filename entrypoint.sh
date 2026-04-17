@@ -20,14 +20,14 @@ LIB="/opt/opencode/lib"
 . "${LIB}/env.sh"
 
 # ─── 2. Coding agent selection ─────────────────────────────────────
-# OPENCODE_APP selects which coding agent to run:
+# CODEBOX_APP selects which coding agent to run:
 #   opencode    (default) — OpenCode AI agent
 #   claude-code           — Anthropic Claude Code agent
 #   flowcode              — FlowCode (RBI) AI agent — web mode only
-OPENCODE_APP="${OPENCODE_APP:-opencode}"
-if [ "${OPENCODE_APP}" = "claude-code" ]; then
+CODEBOX_APP="${CODEBOX_APP:-opencode}"
+if [ "${CODEBOX_APP}" = "claude-code" ]; then
     APP_TITLE_PREFIX="Claude Code"
-elif [ "${OPENCODE_APP}" = "flowcode" ]; then
+elif [ "${CODEBOX_APP}" = "flowcode" ]; then
     APP_TITLE_PREFIX="FlowCode"
 else
     APP_TITLE_PREFIX="OpenCode"
@@ -62,12 +62,12 @@ trap _cleanup SIGTERM SIGINT
 # shellcheck source=lib/config.sh
 . "${LIB}/config.sh"
 
-if [ "${OPENCODE_APP}" = "claude-code" ]; then
+if [ "${CODEBOX_APP}" = "claude-code" ]; then
     echo "→ Configuring Claude Code..."
     export PREFILL_PROXY_ENABLED=false
     _generate_claude_code_config
 
-elif [ "${OPENCODE_APP}" = "flowcode" ]; then
+elif [ "${CODEBOX_APP}" = "flowcode" ]; then
     echo "→ Configuring FlowCode..."
     export PREFILL_PROXY_ENABLED=false
     _generate_flowcode_config
@@ -93,9 +93,9 @@ fi
 . "${LIB}/system-checks.sh"
 
 # ─── 10. Prefill proxy (OpenCode only) ─────────────────────────────
-if [ "${OPENCODE_APP}" = "opencode" ] && [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
+if [ "${CODEBOX_APP}" = "opencode" ] && [ "${PREFILL_PROXY_ENABLED}" = "true" ]; then
     _start_proxy
-elif [ "${OPENCODE_APP}" = "opencode" ]; then
+elif [ "${CODEBOX_APP}" = "opencode" ]; then
     echo "→ Prefill proxy disabled — connecting directly to ${LLM_BASE_URL}"
 fi
 echo ""

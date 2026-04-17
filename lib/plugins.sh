@@ -2,7 +2,7 @@
 # Install opencode npm plugins (if package.json exists in the config dir)
 # and verify the presence of any project-level .opencode directory.
 
-if [ "${OPENCODE_APP}" = "opencode" ] && [ -f "${CONFIG_DIR}/package.json" ]; then
+if [ "${CODEBOX_APP}" = "opencode" ] && [ -f "${CONFIG_DIR}/package.json" ]; then
     echo "→ Ensuring opencode plugins are installed..."
     if (cd "${CONFIG_DIR}" && npm install --prefer-offline --no-audit --no-fund 2>/dev/null); then
         echo "  ✓ Plugins ready"
@@ -11,6 +11,6 @@ if [ "${OPENCODE_APP}" = "opencode" ] && [ -f "${CONFIG_DIR}/package.json" ]; th
     fi
 fi
 
-if [ "${OPENCODE_APP}" = "opencode" ] && [ -d "/workspace/.opencode" ]; then
+if [ "${CODEBOX_APP}" = "opencode" ] && [ -d "/workspace/.opencode" ]; then
     echo "  ✓ Project .opencode directory found"
 fi

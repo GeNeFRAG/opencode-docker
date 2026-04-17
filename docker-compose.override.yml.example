@@ -17,8 +17,8 @@ services:
   my-project:
     extends:
       file: docker-compose.yml
-      service: opencode-docker
-    container_name: opencode-my-project
+      service: codebox
+    container_name: codebox-my-project
     ports:
       !override
       - "3001:3001"
@@ -28,13 +28,13 @@ services:
       !override
       - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
       - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-      - OPENCODE_ENABLE_EXPERIMENTAL_MODELS=1
-      - OPENCODE_PORT=3001
+      - CODEBOX_ENABLE_EXPERIMENTAL_MODELS=1
+      - CODEBOX_PORT=3001
     volumes:
       !override
       - ${REPOS_PATH:-~/repos}/my-project:/workspace
-      - opencode-data-my-project:/root/.local/share/opencode
-      - opencode-memory-my-project:/root/.config/opencode/memory
+      - codebox-data-my-project:/root/.local/share/opencode
+      - codebox-memory-my-project:/root/.config/opencode/memory
       - /var/run/docker.sock:/var/run/docker.sock
       # ─── .env file (reloaded on container restart) ──────────
       - ./.env:/opt/opencode/.env:ro
@@ -56,8 +56,8 @@ services:
   # another-project:
   #   extends:
   #     file: docker-compose.yml
-  #     service: opencode-docker
-  #   container_name: opencode-another-project
+  #     service: codebox
+  #   container_name: codebox-another-project
   #   ports:
   #     !override
   #     - "3002:3002"
@@ -67,12 +67,12 @@ services:
   #     !override
   #     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
   #     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-  #     - OPENCODE_PORT=3002
+  #     - CODEBOX_PORT=3002
   #   volumes:
   #     !override
   #     - ${REPOS_PATH:-~/repos}/another-project:/workspace
-  #     - opencode-data-another:/root/.local/share/opencode
-  #     - opencode-memory-another:/root/.config/opencode/memory
+  #     - codebox-data-another:/root/.local/share/opencode
+  #     - codebox-memory-another:/root/.config/opencode/memory
   #     - /var/run/docker.sock:/var/run/docker.sock
   #     # ─── .env file (reloaded on container restart) ──────────
   #     - ./.env:/opt/opencode/.env:ro
@@ -103,8 +103,8 @@ services:
   # my-fullstack:
   #   extends:
   #     file: docker-compose.yml
-  #     service: opencode-docker
-  #   container_name: opencode-my-fullstack
+  #     service: codebox
+  #   container_name: codebox-my-fullstack
   #   ports:
   #     !override
   #     - "3003:3003"
@@ -114,7 +114,7 @@ services:
   #     !override
   #     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
   #     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-  #     - OPENCODE_PORT=3003
+  #     - CODEBOX_PORT=3003
   #   volumes:
   #     !override
   #     # ─── Multi-repo: mount each repo as a subdirectory ───────
@@ -122,8 +122,8 @@ services:
   #     - ${REPOS_PATH:-~/repos}/frontend:/workspace/frontend
   #     - ${REPOS_PATH:-~/repos}/shared-lib:/workspace/shared-lib
   #     # ─── Data & config (per-workspace) ───────────────────────
-  #     - opencode-data-fullstack:/root/.local/share/opencode
-  #     - opencode-memory-fullstack:/root/.config/opencode/memory
+  #     - codebox-data-fullstack:/root/.local/share/opencode
+  #     - codebox-memory-fullstack:/root/.config/opencode/memory
   #     - /var/run/docker.sock:/var/run/docker.sock
   #     # ─── .env file (reloaded on container restart) ──────────
   #     - ./.env:/opt/opencode/.env:ro
@@ -148,7 +148,7 @@ services:
   # flowcode-my-project:
   #   extends:
   #     file: docker-compose.yml
-  #     service: opencode-docker
+  #     service: codebox
   #   build:
   #     context: .
   #     dockerfile: Dockerfile.rbi
@@ -164,8 +164,8 @@ services:
   #     !override
   #     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
   #     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-  #     - OPENCODE_APP=flowcode
-  #     - OPENCODE_PORT=3005
+  #     - CODEBOX_APP=flowcode
+  #     - CODEBOX_PORT=3005
   #   volumes:
   #     !override
   #     - ${REPOS_PATH:-~/repos}/my-project:/workspace
@@ -193,7 +193,7 @@ services:
   # claude-code-my-project:
   #   extends:
   #     file: docker-compose.yml
-  #     service: opencode-docker
+  #     service: codebox
   #   container_name: claude-code-my-project
   #   ports:
   #     !override
@@ -204,14 +204,14 @@ services:
   #     !override
   #     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
   #     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-  #     - OPENCODE_APP=claude-code
-  #     - OPENCODE_MODE=tmux
-  #     - OPENCODE_PORT=3004
+  #     - CODEBOX_APP=claude-code
+  #     - CODEBOX_MODE=tmux
+  #     - CODEBOX_PORT=3004
   #   volumes:
   #     !override
   #     - ${REPOS_PATH:-~/repos}/my-project:/workspace
   #     - claude-code-data-my-project:/root/.claude
-  #     - opencode-memory-claude-my-project:/root/.config/opencode/memory
+  #     - codebox-memory-claude-my-project:/root/.config/opencode/memory
   #     - /var/run/docker.sock:/var/run/docker.sock
   #     - ./.env:/opt/opencode/.env:ro
   #     - ${HOME}/.ssh:/root/.ssh:ro
@@ -223,21 +223,21 @@ services:
   #     - ./.docker/mkcert-ca:/certs/mkcert-ca
 
 volumes:
-  opencode-data-my-project:
-    name: opencode-data-my-project
-  opencode-memory-my-project:
-    name: opencode-memory-my-project
-  # opencode-data-another:
-  #   name: opencode-data-another
-  # opencode-memory-another:
-  #   name: opencode-memory-another
-  # opencode-data-fullstack:
-  #   name: opencode-data-fullstack
-  # opencode-memory-fullstack:
-  #   name: opencode-memory-fullstack
+  codebox-data-my-project:
+    name: codebox-data-my-project
+  codebox-memory-my-project:
+    name: codebox-memory-my-project
+  # codebox-data-another:
+  #   name: codebox-data-another
+  # codebox-memory-another:
+  #   name: codebox-memory-another
+  # codebox-data-fullstack:
+  #   name: codebox-data-fullstack
+  # codebox-memory-fullstack:
+  #   name: codebox-memory-fullstack
   # claude-code-data-my-project:
   #   name: claude-code-data-my-project
-  # opencode-memory-claude-my-project:
-  #   name: opencode-memory-claude-my-project
+  # codebox-memory-claude-my-project:
+  #   name: codebox-memory-claude-my-project
   # flowcode-data-my-project:
   #   name: flowcode-data-my-project

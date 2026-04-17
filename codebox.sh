@@ -11,7 +11,7 @@ fi
 
 # ─── --dockerfile / -d flag (optional) ────────────────────────────
 # Override the Dockerfile used for build commands.
-# E.g.: ./opencode-web.sh --dockerfile Dockerfile.rbi start
+# E.g.: ./codebox.sh --dockerfile Dockerfile.rbi start
 if [ "${1:-}" = "--dockerfile" ] || [ "${1:-}" = "-d" ]; then
     if [ -z "${2:-}" ]; then
         echo "Error: --dockerfile requires a filename argument"
@@ -84,11 +84,11 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0 start                                    # Start all repos"
-    echo "  $0 start opencode-docker                    # Start only this repo"
+    echo "  $0 start codebox                             # Start only this repo"
     echo "  $0 --dockerfile Dockerfile.rbi start        # Start with FlowCode (RBI only)"
-    echo "  $0 -d Dockerfile.rbi rebuild opencode-docker"
-    echo "  $0 logs opencode-docker                     # Follow logs"
-    echo "  $0 shell opencode-docker                    # Bash into container"
+    echo "  $0 -d Dockerfile.rbi rebuild codebox"
+    echo "  $0 logs codebox                             # Follow logs"
+    echo "  $0 shell codebox                            # Bash into container"
     echo ""
 }
 
@@ -96,7 +96,7 @@ case "${1:-help}" in
     start)
         shift
         _preflight
-        echo -e "${GREEN}Starting OpenCode Web...${NC}"
+        echo -e "${GREEN}Starting CodeBox...${NC}"
         $COMPOSE up -d --build "$@"
         echo ""
         echo -e "${GREEN}✓ Services running:${NC}"
@@ -133,21 +133,21 @@ case "${1:-help}" in
         shift
         _preflight
         echo -e "${YELLOW}Rebuilding...${NC}"
-        $COMPOSE build --build-arg CACHEBUST_OPENCODE="$(date +%s)" "$@"
+        $COMPOSE build --build-arg CACHEBUST_CODEBOX="$(date +%s)" "$@"
         $COMPOSE up -d --force-recreate "$@"
         ;;
     status)
         $COMPOSE ps
         ;;
     urls)
-        echo -e "${CYAN}OpenCode Web URLs:${NC}"
+        echo -e "${CYAN}CodeBox URLs:${NC}"
         $COMPOSE ps --format "table {{.Name}}\t{{.Ports}}" 2>/dev/null || $COMPOSE ps
         ;;
     nuke)
         shift
         _preflight
         echo -e "${YELLOW}Pulling latest base image and rebuilding with latest opencode-ai...${NC}"
-        $COMPOSE build --no-cache --pull --build-arg OPENCODE_VERSION=latest "$@"
+        $COMPOSE build --no-cache --pull --build-arg CODEBOX_VERSION=latest "$@"
         $COMPOSE up -d "$@"
         echo ""
         echo -e "${GREEN}✓ Updated. Current versions:${NC}"

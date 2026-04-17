@@ -3,7 +3,7 @@
 # session-status.sh — tmux status-left: git branch + model + context
 # ═══════════════════════════════════════════════════════════════════
 # Called by tmux status-left every status-interval seconds (tmux mode only).
-# Outputs: " opencode │ main │ claude-opus-4-6 │ 94.7k ctx"
+# Outputs: " codebox │ main │ claude-opus-4-6 │ 94.7k ctx"
 #
 # Model comes from OPENCODE_MODEL env var (always correct).
 # Context tokens are scraped from the TUI pane's right sidebar
@@ -39,7 +39,7 @@ model="${model#google/}"
 # ─── Context tokens: scrape from TUI right sidebar ───────────────
 # Row 4 of the TUI pane always shows "NNN,NNN tokens" in the last
 # ~42 characters (the right sidebar).  Empty until TUI is rendered.
-_row4=$(tmux capture-pane -t opencode:1.1 -p -S 4 -E 4 2>/dev/null)
+_row4=$(tmux capture-pane -t codebox:1.1 -p -S 4 -E 4 2>/dev/null)
 ctx=$(echo "${_row4: -42}" | grep -oE '[0-9,]+ tokens' | tr -cd '0-9')
 
 # ─── Format context tokens ───────────────────────────────────────
@@ -60,4 +60,4 @@ branch_segment=""
 if [ -n "$branch" ]; then
     branch_segment="#[fg=${_sep}]│#[fg=${_branch}] ${branch} "
 fi
-echo "#[fg=${_label},bold] opencode ${branch_segment}#[fg=${_sep}]│#[fg=${_model}] ${model:-?} ${ctx_segment}"
+echo "#[fg=${_label},bold] codebox ${branch_segment}#[fg=${_sep}]│#[fg=${_model}] ${model:-?} ${ctx_segment}"

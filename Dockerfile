@@ -22,12 +22,12 @@ ENV NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
 ENV NODE_OPTIONS="--use-openssl-ca"
 
 # Install opencode-ai globally
-# CACHEBUST_OPENCODE: changing this value invalidates the npm install cache
-# so Docker re-fetches the latest version even when OPENCODE_VERSION=latest.
-# opencode-web.sh rebuild/update pass --build-arg CACHEBUST_OPENCODE=$(date +%s).
-ARG OPENCODE_VERSION=latest
-ARG CACHEBUST_OPENCODE=0
-RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+# CACHEBUST_CODEBOX: changing this value invalidates the npm install cache
+# so Docker re-fetches the latest version even when CODEBOX_VERSION=latest.
+# codebox.sh rebuild/update pass --build-arg CACHEBUST_CODEBOX=$(date +%s).
+ARG CODEBOX_VERSION=latest
+ARG CACHEBUST_CODEBOX=0
+RUN npm install -g opencode-ai@${CODEBOX_VERSION}
 
 # Install Claude Code globally
 ARG CLAUDE_CODE_VERSION=latest
@@ -56,7 +56,7 @@ RUN npm install -g \
 FROM node:22-bookworm-slim AS runtime
 
 # LABEL maintainer="your-name"
-LABEL description="OpenCode AI Web - persistent AI coding agent"
+LABEL description="CodeBox - persistent AI coding agent"
 
 # ─── CA certificate ────────────────────────────────────────────────
 # Build secret from CA_CERT_PATH; at runtime, compose mounts to /certs/ca-bundle.pem.
@@ -102,7 +102,7 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_VERSION}.tgz" \
     | tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
-# ─── ttyd (web terminal — used when OPENCODE_MODE=tui or tmux) ──────
+# ─── ttyd (web terminal — used when CODEBOX_MODE=tui or tmux) ──────
 ARG TTYD_VERSION=1.7.7
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" \
@@ -185,10 +185,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
     /opt/opencode/tmux/session-status-claude.sh \
     /opt/opencode/tmux/tmux-theme-toggle.sh
 
-# Port is set at runtime via OPENCODE_PORT (default 3000)
+# Port is set at runtime via CODEBOX_PORT (default 3000)
 # EXPOSE is omitted — each compose service maps its own port.
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -fsS -o /dev/null http://localhost:${OPENCODE_PORT:-3000}/ || exit 1
+    CMD curl -fsS -o /dev/null http://localhost:${CODEBOX_PORT:-3000}/ || exit 1
 
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]

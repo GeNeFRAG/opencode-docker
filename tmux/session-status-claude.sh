@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════════
 # session-status-claude.sh — tmux status-left for Claude Code mode
 # ═══════════════════════════════════════════════════════════════════
-# Simplified status bar: " claude-code │ main "
+# Simplified status bar: " codebox │ main "
 # No model display (Claude Code manages its own model selection).
 # No context token scraping (Claude Code uses different TUI layout).
 
@@ -27,4 +27,4 @@ branch_segment=""
 if [ -n "$branch" ]; then
     branch_segment="#[fg=${_sep}]│#[fg=${_branch}] ${branch} "
 fi
-echo "#[fg=${_label},bold] claude-code ${branch_segment}"
+echo "#[fg=${_label},bold] codebox ${branch_segment}"

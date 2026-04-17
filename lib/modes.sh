@@ -2,12 +2,12 @@
 # Launch loops for each supported mode: tmux, tui, web.
 # This is the final stage of the entrypoint — it does not return.
 
-OPENCODE_MODE="${OPENCODE_MODE:-web}"
-TMUX_SESSION="opencode"
+CODEBOX_MODE="${CODEBOX_MODE:-web}"
+TMUX_SESSION="codebox"
 
 cd /workspace
 
-if [ "${OPENCODE_MODE}" = "tmux" ]; then
+if [ "${CODEBOX_MODE}" = "tmux" ]; then
     # ── tmux mode: run app inside tmux, served by ttyd ───────────
     # Architecture: ttyd → wrapper script → tmux new/attach → app
     #
@@ -29,10 +29,10 @@ if [ "${OPENCODE_MODE}" = "tmux" ]; then
     # Create runtime copies of theme files in /tmp. For Claude Code,
     # swap session-status.sh → session-status-claude.sh. This avoids
     # mutating the baked-in /opt/opencode/ files (which would persist
-    # across container restarts and break if OPENCODE_APP changes).
+    # across container restarts and break if CODEBOX_APP changes).
     # The tmux-theme-toggle.sh sources from THEME_DIR which we override
     # via an exported env var that the wrapper and toggle script read.
-    if [ "${OPENCODE_APP}" = "claude-code" ]; then
+    if [ "${CODEBOX_APP}" = "claude-code" ]; then
         for _theme_file in /opt/opencode/tmux/tmux-theme-dark.conf /opt/opencode/tmux/tmux-theme-light.conf; do
             _basename=$(basename "${_theme_file}")
             sed 's|/session-status\.sh|/session-status-claude.sh|g' \
@@ -43,20 +43,20 @@ if [ "${OPENCODE_MODE}" = "tmux" ]; then
         export TMUX_THEME_DIR="/opt/opencode/tmux"
     fi
 
-    echo "→ Starting ${APP_TITLE_PREFIX} TUI via tmux + ttyd on 0.0.0.0:${OPENCODE_PORT:-3000}..."
-    echo "  Access: ${_TTYD_PROTOCOL:-http}://localhost:${OPENCODE_PORT:-3000}"
+    echo "→ Starting ${APP_TITLE_PREFIX} TUI via tmux + ttyd on 0.0.0.0:${CODEBOX_PORT:-3000}..."
+    echo "  Access: ${_TTYD_PROTOCOL:-http}://localhost:${CODEBOX_PORT:-3000}"
     echo "  Attach: docker exec -it <container> tmux attach -t ${TMUX_SESSION}"
     echo ""
 
     # Write the tmux wrapper script. ttyd executes this on each browser
     # connection. Terminal dimensions are already correct at this point.
     # Uses 'WRAPPER' (quoted) heredoc so no variable expansion at write time —
-    # APP_BIN and OPENCODE_EXTRA_ARGS are read from the environment
+    # APP_BIN and CODEBOX_EXTRA_ARGS are read from the environment
     # at runtime (both are already exported). No envsubst needed.
-    export OPENCODE_EXTRA_ARGS="${OPENCODE_EXTRA_ARGS:-}"
+    export CODEBOX_EXTRA_ARGS="${CODEBOX_EXTRA_ARGS:-}"
     cat > /tmp/tmux-wrapper.sh <<'WRAPPER'
 #!/bin/bash
-TMUX_SESSION="opencode"
+TMUX_SESSION="codebox"
 
 if [ "${1:-}" = "--loop" ]; then
     # Read theme at launch time (not just at container start) so that
@@ -71,10 +71,10 @@ if [ "${1:-}" = "--loop" ]; then
     # instead of starting a new one. Only applies to OpenCode (Claude Code
     # manages its own session state and does not support this flag).
     _continue_flag=""
-    if [ "${OPENCODE_APP:-opencode}" = "opencode" ] && [ "${2:-}" = "--respawn" ]; then
+    if [ "${CODEBOX_APP:-opencode}" = "opencode" ] && [ "${2:-}" = "--respawn" ]; then
         _continue_flag="--continue"
     fi
-    exec "${APP_BIN}" ${_continue_flag} ${OPENCODE_EXTRA_ARGS}
+    exec "${APP_BIN}" ${_continue_flag} ${CODEBOX_EXTRA_ARGS}
 fi
 
 if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
@@ -103,7 +103,7 @@ WRAPPER
     # These bindings are overridden after the first session is created via
     # the wrapper script. We schedule them in a background subshell that
     # waits for the tmux server to be up.
-    if [ "${OPENCODE_APP}" = "claude-code" ]; then
+    if [ "${CODEBOX_APP}" = "claude-code" ]; then
         (
             # Wait for tmux server to be ready (up to 10s)
             for _i in $(seq 1 20); do
@@ -137,12 +137,12 @@ WRAPPER
             exit 1
         fi
         ttyd \
-            --port "${OPENCODE_PORT:-3000}" \
+            --port "${CODEBOX_PORT:-3000}" \
             --interface 0.0.0.0 \
             --writable \
             ${_TTYD_SSL_FLAGS:-} \
-            -t titleFixed="${OPENCODE_TITLE:-${APP_TITLE_PREFIX} (tmux)}" \
-            ${OPENCODE_TUI_ARGS:-} \
+            -t titleFixed="${CODEBOX_TITLE:-${APP_TITLE_PREFIX} (tmux)}" \
+            ${CODEBOX_TUI_ARGS:-} \
             /tmp/tmux-wrapper.sh
         _rc=$?
         if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
@@ -153,24 +153,24 @@ WRAPPER
         sleep "${_sleep}"
     done
 
-elif [ "${OPENCODE_MODE}" = "tui" ]; then
+elif [ "${CODEBOX_MODE}" = "tui" ]; then
     # ── TUI mode: app TUI served directly by ttyd ────────────────
-    echo "→ Starting ${APP_TITLE_PREFIX} TUI via ttyd on 0.0.0.0:${OPENCODE_PORT:-3000}..."
-    echo "  Access: ${_TTYD_PROTOCOL:-http}://localhost:${OPENCODE_PORT:-3000}"
+    echo "→ Starting ${APP_TITLE_PREFIX} TUI via ttyd on 0.0.0.0:${CODEBOX_PORT:-3000}..."
+    echo "  Access: ${_TTYD_PROTOCOL:-http}://localhost:${CODEBOX_PORT:-3000}"
     echo ""
 
     # Restart loop with exponential backoff on consecutive failures.
     _fail_count=0
     while true; do
         ttyd \
-            --port "${OPENCODE_PORT:-3000}" \
+            --port "${CODEBOX_PORT:-3000}" \
             --interface 0.0.0.0 \
             --writable \
             --cwd /workspace \
             ${_TTYD_SSL_FLAGS:-} \
-            -t titleFixed="${OPENCODE_TITLE:-${APP_TITLE_PREFIX} (tui)}" \
-            ${OPENCODE_TUI_ARGS:-} \
-            "${APP_BIN}" ${OPENCODE_EXTRA_ARGS:-}
+            -t titleFixed="${CODEBOX_TITLE:-${APP_TITLE_PREFIX} (tui)}" \
+            ${CODEBOX_TUI_ARGS:-} \
+            "${APP_BIN}" ${CODEBOX_EXTRA_ARGS:-}
         _rc=$?
         if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
         _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))
@@ -182,14 +182,14 @@ elif [ "${OPENCODE_MODE}" = "tui" ]; then
 
 else
     # ── Web mode (default) ───────────────────────────────────────
-    if [ "${OPENCODE_APP}" = "claude-code" ]; then
+    if [ "${CODEBOX_APP}" = "claude-code" ]; then
         echo "  ✗ FATAL: web mode is not supported for Claude Code — use tui or tmux"
         exit 1
     fi
 
-    if [ "${OPENCODE_APP}" = "flowcode" ]; then
-        echo "→ Starting FlowCode web on 0.0.0.0:${OPENCODE_PORT:-3000}..."
-        echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
+    if [ "${CODEBOX_APP}" = "flowcode" ]; then
+        echo "→ Starting FlowCode web on 0.0.0.0:${CODEBOX_PORT:-3000}..."
+        echo "  Access: http://localhost:${CODEBOX_PORT:-3000}"
         echo ""
 
         _fail_count=0
@@ -206,16 +206,16 @@ else
     fi
 
     # OpenCode web mode
-    echo "→ Starting opencode web on 0.0.0.0:${OPENCODE_PORT:-3000}..."
-    echo "  Access: http://localhost:${OPENCODE_PORT:-3000}"
+    echo "→ Starting opencode web on 0.0.0.0:${CODEBOX_PORT:-3000}..."
+    echo "  Access: http://localhost:${CODEBOX_PORT:-3000}"
     echo ""
 
     _fail_count=0
     while true; do
         "${APP_BIN}" web \
             --hostname 0.0.0.0 \
-            --port "${OPENCODE_PORT:-3000}" \
-            ${OPENCODE_EXTRA_ARGS:-}
+            --port "${CODEBOX_PORT:-3000}" \
+            ${CODEBOX_EXTRA_ARGS:-}
         _rc=$?
         if [ "${_rc}" -eq 0 ]; then _fail_count=0; else _fail_count=$((_fail_count + 1)); fi
         _sleep=$(( 3 * (1 << (_fail_count > 5 ? 5 : _fail_count)) ))

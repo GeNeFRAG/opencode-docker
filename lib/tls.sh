@@ -7,9 +7,9 @@
 # Unlike named volumes, bind mounts survive `docker compose down -v`.
 #
 # Env vars:
-#   OPENCODE_TLS       — "true" (default for tui/tmux) or "false" to disable
-#   OPENCODE_TLS_CERT  — path to custom certificate (skips mkcert)
-#   OPENCODE_TLS_KEY   — path to custom private key  (skips mkcert)
+#   CODEBOX_TLS       — "true" (default for tui/tmux) or "false" to disable
+#   CODEBOX_TLS_CERT  — path to custom certificate (skips mkcert)
+#   CODEBOX_TLS_KEY   — path to custom private key  (skips mkcert)
 #
 # Exports:
 #   _TTYD_SSL_FLAGS    — ttyd CLI flags (empty when TLS is off)
@@ -18,25 +18,25 @@
 _TTYD_SSL_FLAGS=""
 _TTYD_PROTOCOL="http"
 
-OPENCODE_MODE="${OPENCODE_MODE:-web}"
+CODEBOX_MODE="${CODEBOX_MODE:-web}"
 
-if [ "${OPENCODE_MODE}" = "web" ]; then
+if [ "${CODEBOX_MODE}" = "web" ]; then
     export _TTYD_SSL_FLAGS _TTYD_PROTOCOL
     return 0
 fi
 
-OPENCODE_TLS="${OPENCODE_TLS:-true}"
+CODEBOX_TLS="${CODEBOX_TLS:-true}"
 
-if [ "${OPENCODE_TLS}" != "true" ]; then
+if [ "${CODEBOX_TLS}" != "true" ]; then
     export _TTYD_SSL_FLAGS _TTYD_PROTOCOL
     return 0
 fi
 
 _TLS_DIR="/tmp/tls"
-_TLS_CERT="${OPENCODE_TLS_CERT:-${_TLS_DIR}/cert.pem}"
-_TLS_KEY="${OPENCODE_TLS_KEY:-${_TLS_DIR}/key.pem}"
+_TLS_CERT="${CODEBOX_TLS_CERT:-${_TLS_DIR}/cert.pem}"
+_TLS_KEY="${CODEBOX_TLS_KEY:-${_TLS_DIR}/key.pem}"
 
-if [ -z "${OPENCODE_TLS_CERT:-}" ] || [ -z "${OPENCODE_TLS_KEY:-}" ]; then
+if [ -z "${CODEBOX_TLS_CERT:-}" ] || [ -z "${CODEBOX_TLS_KEY:-}" ]; then
     mkdir -p "${_TLS_DIR}"
     _CAROOT="/certs/mkcert-ca"
     _CA_CREATED=false

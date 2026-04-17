@@ -1,34 +1,34 @@
 # ═══════════════════════════════════════════════════════════════════
-# OpenCode Web — Multi-Repo Setup
+# CodeBox — Multi-Repo Setup
 # Each repo gets its own service, port, and data volume.
 #
 # To add your own project repos, create a docker-compose.override.yml
 # (gitignored) — see docker-compose.override.yml.example
 # ═══════════════════════════════════════════════════════════════════
 
-x-opencode-common: &opencode-common
+x-codebox-common: &codebox-common
   build:
     context: .
     # Public build (default) — no FlowCode support.
-    # RBI users who need OPENCODE_APP=flowcode: pass --dockerfile Dockerfile.rbi
-    # to opencode-web.sh, or override dockerfile in docker-compose.override.yml
+    # RBI users who need CODEBOX_APP=flowcode: pass --dockerfile Dockerfile.rbi
+    # to codebox.sh, or override dockerfile in docker-compose.override.yml
     # (see docker-compose.override.yml.example).
     dockerfile: ${DOCKERFILE:-Dockerfile}
     args:
-      OPENCODE_VERSION: ${OPENCODE_VERSION:-latest}
+      CODEBOX_VERSION: ${CODEBOX_VERSION:-latest}
     secrets:
       - ca-cert
   restart: unless-stopped
   env_file:
     - .env
-  environment: &opencode-env
+  environment: &codebox-env
     - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
     - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-    - OPENCODE_ENABLE_EXPERIMENTAL_MODELS=1
+    - CODEBOX_ENABLE_EXPERIMENTAL_MODELS=1
     # ─── Coding Agent Selection ─────────────────────────────────
-    # OPENCODE_APP: opencode (default) or claude-code
+    # CODEBOX_APP: opencode (default) or claude-code
     # Set in .env — see .env.example for details.
-  volumes: &opencode-volumes
+  volumes: &codebox-volumes
     # ─── Docker socket (for MCP containers) ───────────────────
     - /var/run/docker.sock:/var/run/docker.sock
     # ─── SSH & Git ────────────────────────────────────────────
@@ -42,7 +42,7 @@ x-opencode-common: &opencode-common
     - ${HOST_AUTH_JSON:-.docker/empty-file}:/opt/opencode/host-auth.json:ro
     # ─── CA certificate (optional, for corporate proxies) ─────
     - ${CA_CERT_PATH:-.docker/empty-file}:/certs/ca-bundle.pem:ro
-  healthcheck: &opencode-healthcheck
+  healthcheck: &codebox-healthcheck
     interval: 30s
     timeout: 10s
     start_period: 15s
@@ -58,9 +58,9 @@ services:
   # ─────────────────────────────────────────────────────────────
   # opencode-docker (this repo) — http://localhost:3000
   # ─────────────────────────────────────────────────────────────
-  opencode-docker:
-    <<: *opencode-common
-    container_name: opencode-self
+  codebox:
+    <<: *codebox-common
+    container_name: codebox-self
     # ── Network mode ───────────────────────────────────────────────
     # Set DOCKER_NETWORK_MODE=host in .env to bypass the Docker bridge
     # NAT and connect directly via the host's network stack.
@@ -68,21 +68,21 @@ services:
     # and is the recommended setting on Linux when low latency matters.
     # Note: host networking is Linux-only (ignored on Docker Desktop).
     # With host mode, port mapping below is ignored — the container
-    # binds directly to the host port set by OPENCODE_PORT.
+    # binds directly to the host port set by CODEBOX_PORT.
     network_mode: ${DOCKER_NETWORK_MODE:-bridge}
     ports:
       - "3000:3000"
     healthcheck:
-      <<: *opencode-healthcheck
-      test: ["CMD-SHELL", "if [ \"${OPENCODE_TLS:-true}\" = true ] && [ \"${OPENCODE_MODE:-web}\" != web ]; then curl -kf https://localhost:${OPENCODE_PORT:-3000}/; else curl -f http://localhost:${OPENCODE_PORT:-3000}/; fi"]
+      <<: *codebox-healthcheck
+      test: ["CMD-SHELL", "if [ \"${CODEBOX_TLS:-true}\" = true ] && [ \"${CODEBOX_MODE:-web}\" != web ]; then curl -kf https://localhost:${CODEBOX_PORT:-3000}/; else curl -f http://localhost:${CODEBOX_PORT:-3000}/; fi"]
     environment:
       - NODE_EXTRA_CA_CERTS=/certs/ca-bundle.pem
       - REQUESTS_CA_BUNDLE=/certs/ca-bundle.pem
-      - OPENCODE_ENABLE_EXPERIMENTAL_MODELS=1
+      - CODEBOX_ENABLE_EXPERIMENTAL_MODELS=1
     volumes:
       - .:/workspace
-      - opencode-data-self:/root/.local/share/opencode
-      - opencode-memory-self:/root/.config/opencode/memory
+      - codebox-data-self:/root/.local/share/opencode
+      - codebox-memory-self:/root/.config/opencode/memory
       # Inherit shared mounts
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOME}/.ssh:/root/.ssh:ro
@@ -100,11 +100,11 @@ services:
       - ./.env:/opt/opencode/.env:ro
 
 volumes:
-  opencode-data-self:
-    name: opencode-data-self
-  opencode-memory-self:
-    name: opencode-memory-self
-  # Claude Code session/settings volume — only mounted when OPENCODE_APP=claude-code.
+  codebox-data-self:
+    name: codebox-data-self
+  codebox-memory-self:
+    name: codebox-memory-self
+  # Claude Code session/settings volume — only mounted when CODEBOX_APP=claude-code.
   # ⚠ IMPORTANT: You MUST add `- claude-code-data-self:/root/.claude` to the
   #   service's volumes in docker-compose.override.yml to persist Claude Code
   #   session data. Without this mount, data is lost on `docker compose down`.
@@ -113,7 +113,7 @@ volumes:
   #   if you encounter compatibility issues with stale session data.
   claude-code-data-self:
     name: claude-code-data-self
-  # FlowCode workspace volume — only mounted when OPENCODE_APP=flowcode.
+  # FlowCode workspace volume — only mounted when CODEBOX_APP=flowcode.
   # ⚠ IMPORTANT: Add `- flowcode-data-self:/var/flowcode/workspaces` to the
   #   service's volumes in docker-compose.override.yml for persistent FlowCode
   #   workspace and session data.
