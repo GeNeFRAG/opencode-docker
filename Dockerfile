@@ -150,7 +150,8 @@ RUN cp /usr/local/lib/node_modules/opencode-ai/bin/.opencode /usr/local/bin/open
     ln -sf ../lib/node_modules/@playwright/mcp/cli.js /usr/local/bin/playwright-mcp && \
     ln -sf ../lib/node_modules/playwright/cli.js /usr/local/bin/playwright && \
     ln -sf ../lib/node_modules/@cyanheads/git-mcp-server/dist/index.js /usr/local/bin/git-mcp-server && \
-    ln -sf ../lib/node_modules/@hypnosis/docker-mcp-server/dist/index.js /usr/local/bin/docker-mcp-server
+    ln -sf ../lib/node_modules/@hypnosis/docker-mcp-server/dist/index.js /usr/local/bin/docker-mcp-server && \
+    ln -sf ../lib/node_modules/serve/build/main.js /usr/local/bin/serve
 
 # ─── Playwright browser (Chromium headless + system libraries) ────────────────
 RUN playwright install --with-deps chromium
