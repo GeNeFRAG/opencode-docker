@@ -63,6 +63,7 @@ RUN npm install -g \
     @modelcontextprotocol/server-sequential-thinking@2025.12.18 \
     mcp-time-server@1.0.1 \
     @playwright/mcp@0.0.68 \
+    playwright \
     @cyanheads/git-mcp-server@2.8.4 \
     @hypnosis/docker-mcp-server@1.4.1
 
@@ -123,6 +124,10 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
     curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_VERSION}.tgz" \
     | tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
+# ─── docker-compose shim (delegates to compose v2; needed by legacy scripts) ──
+RUN printf '#!/bin/sh\nexec docker compose "$@"\n' > /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
+
 # ─── ttyd (web terminal — used when CODEBOX_MODE=tui or tmux) ──────
 ARG TTYD_VERSION=1.7.7
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") && \
@@ -163,14 +168,18 @@ RUN cp /usr/local/lib/node_modules/opencode-ai/bin/.opencode /usr/local/bin/open
     chmod +x /usr/local/bin/opencode-go && \
     chmod +x /usr/local/bin/flowcode-server && \
     ln -sf /usr/local/lib/node_modules/opencode-ai/bin/opencode /usr/local/bin/opencode && \
-    ln -sf /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js /usr/local/bin/claude && \
+    ln -sf /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude && \
     ln -sf ../lib/node_modules/@modelcontextprotocol/server-memory/dist/index.js /usr/local/bin/mcp-server-memory && \
     ln -sf ../lib/node_modules/@upstash/context7-mcp/dist/index.js /usr/local/bin/context7-mcp && \
     ln -sf ../lib/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js /usr/local/bin/mcp-server-sequential-thinking && \
     ln -sf ../lib/node_modules/mcp-time-server/bin/mcp-time-server.js /usr/local/bin/mcp-time-server && \
     ln -sf ../lib/node_modules/@playwright/mcp/cli.js /usr/local/bin/playwright-mcp && \
+    ln -sf ../lib/node_modules/playwright/cli.js /usr/local/bin/playwright && \
     ln -sf ../lib/node_modules/@cyanheads/git-mcp-server/dist/index.js /usr/local/bin/git-mcp-server && \
     ln -sf ../lib/node_modules/@hypnosis/docker-mcp-server/dist/index.js /usr/local/bin/docker-mcp-server
+
+# ─── Playwright browser (Chromium headless + system libraries) ────────────────
+RUN playwright install --with-deps chromium
 
 # ─── Workspace and data directories ───────────────────────────────
 RUN mkdir -p /workspace \
