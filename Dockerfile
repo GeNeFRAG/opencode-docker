@@ -49,7 +49,8 @@ RUN npm install -g \
     @playwright/mcp@0.0.68 \
     playwright \
     @cyanheads/git-mcp-server@2.8.4 \
-    @hypnosis/docker-mcp-server@1.4.1
+    @hypnosis/docker-mcp-server@1.4.1 \
+    serve@14.2.3
 
 # ═══════════════════════════════════════════════════════════════════
 # Runtime stage: slim, no build tools
