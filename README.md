@@ -40,12 +40,12 @@ open http://localhost:3000
 ```bash
 git clone <repo-url> && cd codebox
 cp .env.example .env
-vim .env          # Set ANTHROPIC_API_KEY, CODEBOX_APP=claude-code, CODEBOX_MODE=tmux
+vim .env          # Set LLM_API_KEY, CODEBOX_APP=claude-code, CODEBOX_MODE=tmux
 ./codebox.sh start
 open http://localhost:3000
 ```
 
-> **Note:** Claude.ai OAuth login does **not** work in headless Docker. You must provide `ANTHROPIC_API_KEY` (or `LLM_API_KEY` as a fallback).
+> **Note:** Claude.ai OAuth login does **not** work in headless Docker. You must provide `LLM_API_KEY` — it is automatically mapped to `ANTHROPIC_API_KEY` at startup.
 
 ### FlowCode
 
@@ -54,7 +54,7 @@ open http://localhost:3000
 ```bash
 git clone <repo-url> && cd codebox
 cp .env.example .env
-vim .env          # Set ANTHROPIC_AUTH_TOKEN (or LLM_API_KEY as fallback), CODEBOX_APP=flowcode
+vim .env          # Set LLM_API_KEY, LLM_BASE_URL, CODEBOX_APP=flowcode
 ./codebox.sh --dockerfile Dockerfile.rbi start
 open http://localhost:3000
 ```
@@ -183,8 +183,8 @@ Set `CODEBOX_APP=claude-code` in `.env` to run [Anthropic Claude Code](https://g
 | | OpenCode | Claude Code | FlowCode |
 |---|---------|-------------|---------|
 | **UI modes** | `web`, `tui`, `tmux` | `tui`, `tmux` only | `web` only |
-| **API key** | `LLM_API_KEY` | `ANTHROPIC_API_KEY` (falls back to `LLM_API_KEY`) | `ANTHROPIC_AUTH_TOKEN` (falls back to `LLM_API_KEY`) |
-| **Custom endpoint** | `LLM_BASE_URL` | `ANTHROPIC_BASE_URL` (falls back to `LLM_BASE_URL`) | `ANTHROPIC_BASE_URL` (falls back to `LLM_BASE_URL`) |
+| **API key** | `LLM_API_KEY` | `LLM_API_KEY` → mapped to `ANTHROPIC_API_KEY` | `LLM_API_KEY` → mapped to `ANTHROPIC_AUTH_TOKEN` |
+| **Custom endpoint** | `LLM_BASE_URL` | `LLM_BASE_URL` → mapped to `ANTHROPIC_BASE_URL` | `LLM_BASE_URL` → mapped to `ANTHROPIC_BASE_URL` |
 | **Prefill proxy** | ✅ Enabled | ✗ Not used | ✗ Not used |
 | **Model fallback** | ✅ `OPENCODE_MODEL_FALLBACK` | ✗ Not applicable | ✗ Not applicable |
 | **Agent monitor** | ✅ tmux status bar + pane | ✗ Not available | ✗ Not available |
@@ -198,7 +198,7 @@ Follow the [Quick Start](#quick-start) steps, setting these values in `.env`:
 ```bash
 CODEBOX_APP=claude-code
 CODEBOX_MODE=tmux        # or tui — web mode is not supported
-ANTHROPIC_API_KEY=sk-ant-...
+LLM_API_KEY=sk-ant-...
 ```
 
 For multi-repo setups, add the Claude Code data volume to your service in `docker-compose.override.yml`:
@@ -236,10 +236,8 @@ volumes:
 
 The entrypoint automatically configures authentication at startup:
 
-- `ANTHROPIC_API_KEY` is used directly if set
-- Otherwise `LLM_API_KEY` is mapped to `ANTHROPIC_API_KEY`
-- `ANTHROPIC_BASE_URL` is used if set (for custom or proxy endpoints)
-- Otherwise `LLM_BASE_URL` is mapped to `ANTHROPIC_BASE_URL`
+- `LLM_API_KEY` is mapped to `ANTHROPIC_API_KEY` at startup
+- `LLM_BASE_URL` is mapped to `ANTHROPIC_BASE_URL` at startup (omit for the official Anthropic API)
 
 The interactive onboarding wizard, API key approval prompt, and workspace trust dialog are all pre-seeded — the TUI starts directly without interactive prompts.
 
@@ -307,10 +305,10 @@ services:
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API key. Falls back to `LLM_API_KEY` if not set |
+| `LLM_API_KEY` | Anthropic API key — mapped to `ANTHROPIC_API_KEY` at startup |
 | `CODEBOX_APP` | Set to `claude-code` |
 | `CLAUDE_CODE_MODEL` | *(Optional)* Default model (e.g. `claude-opus-4-6`). Exported as `CLAUDE_MODEL` at runtime |
-| `ANTHROPIC_BASE_URL` | *(Optional)* Custom/proxy endpoint. Falls back to `LLM_BASE_URL` if not set |
+| `LLM_BASE_URL` | *(Optional)* Custom/proxy endpoint — mapped to `ANTHROPIC_BASE_URL` at startup |
 
 > **Note:** Do not set `CODEBOX_MODE` for Claude Code — only `tui` and `tmux` are valid; `web` is a fatal error.
 
@@ -318,9 +316,9 @@ services:
 
 | Variable | Description |
 |----------|-------------|
-| `ANTHROPIC_AUTH_TOKEN` | Auth token for the RBI GenAI Gateway. Falls back to `LLM_API_KEY` if not set |
+| `LLM_API_KEY` | Auth token for the RBI GenAI Gateway — mapped to `ANTHROPIC_AUTH_TOKEN` at startup |
 | `CODEBOX_APP` | Set to `flowcode` |
-| `ANTHROPIC_BASE_URL` | *(Optional)* Gateway endpoint. Falls back to `LLM_BASE_URL` if not set |
+| `LLM_BASE_URL` | Gateway endpoint — mapped to `ANTHROPIC_BASE_URL` at startup |
 
 > **Note:** Do not set `CODEBOX_MODE` for FlowCode — it always runs in `web` mode regardless of what is set.
 
@@ -341,10 +339,7 @@ services:
 | `CODEBOX_EXTRA_ARGS` | Extra arguments passed to the agent binary |
 | `CODEBOX_TUI_ARGS` | Extra arguments passed to `ttyd` when `CODEBOX_MODE=tui` or `tmux` |
 | `TZ` | Timezone for timestamps in the agent monitor and tmux status bar (default: `UTC`) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Code. Falls back to `LLM_API_KEY` if not set |
 | `CLAUDE_CODE_MODEL` | Default model for Claude Code (e.g. `claude-opus-4-6`, `claude-sonnet-4-6`). Exported as `CLAUDE_MODEL` at runtime. Leave unset to use Claude Code's built-in default. Claude Code only |
-| `ANTHROPIC_AUTH_TOKEN` | Auth token for FlowCode. Falls back to `LLM_API_KEY` if not set |
-| `ANTHROPIC_BASE_URL` | Custom/proxy endpoint for Claude Code or FlowCode. Falls back to `LLM_BASE_URL` if not set |
 | `REPOS_PATH` | Host path to repos (default: `~/repos`) |
 | `CA_CERT_PATH` | CA certificate bundle path on host |
 | `PREFILL_PROXY` | Enable the prefill-stripping proxy (default: `true`). OpenCode only. Set `false` to connect directly to `LLM_BASE_URL`. |
@@ -560,7 +555,7 @@ Also rename:
 | TUI: attach to tmux from host | `docker exec -it <container> tmux attach -t codebox` |
 | TUI: tmux key bindings not working | Use `Option-m` / `Option-s` root bindings (Mac); or try `Ctrl-Space` prefix (may be intercepted by browser/ttyd) |
 | TUI: custom tmux config | Mount to `/root/.config/opencode/tmux.conf:ro` — applied at startup |
-| Claude Code: no API key error | Set `ANTHROPIC_API_KEY` in `.env`. OAuth login does not work in headless Docker |
+| Claude Code: no API key error | Set `LLM_API_KEY` in `.env` — it is mapped to `ANTHROPIC_API_KEY` at startup. OAuth login does not work in headless Docker |
 | Claude Code: web mode fails | Set `CODEBOX_MODE=tui` or `CODEBOX_MODE=tmux` — web mode is not supported for Claude Code |
 | FlowCode: tui/tmux mode | FlowCode only supports `web` mode — `CODEBOX_MODE` is automatically overridden to `web` |
 | FlowCode: binary not found | You built with the public `Dockerfile`. Rebuild with `Dockerfile.rbi` (requires RBI Artifactory access) |
@@ -611,14 +606,14 @@ When a container starts, `entrypoint.sh` sources a set of modular scripts from `
 
 - **MCP config** — `envsubst` on `templates/claude-code.mcp.json.template` → `claude-code-mcp.json`; passed via `--mcp-config`
 - **Settings** — Writes `/root/.claude/settings.json` with pre-approved tool permissions (`Bash(*)`, `Read(*)`, `Write(*)`, `Edit(*)`, `mcp__*`)
-- **Auth mapping** — Uses `ANTHROPIC_API_KEY` directly; falls back to `LLM_API_KEY`. Maps `LLM_BASE_URL` → `ANTHROPIC_BASE_URL` if `ANTHROPIC_BASE_URL` is not set
+- **Auth mapping** — Maps `LLM_API_KEY` → `ANTHROPIC_API_KEY` and `LLM_BASE_URL` → `ANTHROPIC_BASE_URL` at startup
 - **Model mapping** — Exports `CLAUDE_CODE_MODEL` → `CLAUDE_MODEL` (Claude Code's env var for default model selection)
 - **Onboarding pre-seed** — Writes `/root/.claude/.config.json` to skip the setup wizard, API key approval prompt, and workspace trust dialog
 
 **FlowCode-specific steps (in `lib/config.sh`):**
 
 - **MCP config** — `envsubst` on `templates/flowcode.mcp.json.template` → `/root/.config/flowcode/config.json`
-- **Credentials** — Writes `/root/.config/flowcode/credentials.json` with `ANTHROPIC_AUTH_TOKEN` (falls back to `LLM_API_KEY`) and `ANTHROPIC_BASE_URL` (falls back to `LLM_BASE_URL`)
+- **Credentials** — Writes `/root/.config/flowcode/credentials.json` with `LLM_API_KEY` → `ANTHROPIC_AUTH_TOKEN` and `LLM_BASE_URL` → `ANTHROPIC_BASE_URL`
 - **GitHub token** — Maps `GITHUB_ENTERPRISE_TOKEN` or `GITHUB_PERSONAL_TOKEN` → `GH_TOKEN` for git operations in the FlowCode terminal
 
 </details>
