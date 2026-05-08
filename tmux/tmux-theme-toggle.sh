@@ -49,7 +49,7 @@ echo "$next" > /tmp/.tmux-theme
 # /tmp/.tmux-theme → sets COLORFGBG → exec opencode, so lipgloss
 # detects the new background on startup.
 # Target: window 1, pane 1 (the opencode TUI pane).
-tmux respawn-pane -k -t opencode:1.1 2>/dev/null
+tmux respawn-pane -k -t codebox:1.1 2>/dev/null
 
 # Brief visual confirmation
 tmux display-message "Theme: ${next}"

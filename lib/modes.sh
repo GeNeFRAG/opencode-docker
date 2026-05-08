@@ -101,8 +101,10 @@ else
     # condition (1=true/0=false) rather than run as a shell command (which
     # would always fail and make WheelDown a no-op, trapping users in copy mode).
     [ "${CODEBOX_APP:-opencode}" = "claude-code" ] && {
-        tmux bind -T root WheelUpPane   if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-up"   "copy-mode -e \; send-keys -X -N 3 scroll-up"
+        tmux bind -T root WheelUpPane   if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-up"   "copy-mode -e"
         tmux bind -T root WheelDownPane if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-down" ""
+        tmux bind C-r run-shell "kill -WINCH #{pane_pid} 2>/dev/null; sleep 0.05; kill -WINCH #{pane_pid} 2>/dev/null"
+        tmux set-hook -g client-resized "run-shell -b 'kill -WINCH #{pane_pid} 2>/dev/null; sleep 0.05; kill -WINCH #{pane_pid} 2>/dev/null'"
     }
     exec tmux -u attach -t "$TMUX_SESSION"
 fi
@@ -198,18 +200,20 @@ if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     exec tmux -u attach -t "$TMUX_SESSION"
 fi
 
-# Canvas is sized from the first attaching browser (tput cols/lines) then
-# pinned via window-size=manual so later clients (e.g. after screen lock)
-# can't reshape the TUI.
+# Initial canvas size comes from the first attaching browser (tput
+# cols/lines). window-size=latest lets the canvas track later clients,
+# so resizing the browser reflows the TUI instead of clipping it.
 COLS=$(tput cols  2>/dev/null || echo 200)
 ROWS=$(tput lines 2>/dev/null || echo 50)
 tmux -u new-session -d -s "$TMUX_SESSION" -x "$COLS" -y "$ROWS" -c /workspace \
     /tmp/tui-wrapper.sh --run
-tmux set-option -t "$TMUX_SESSION" window-size manual
+tmux set-option -t "$TMUX_SESSION" window-size latest
 tmux set-option -t "$TMUX_SESSION" status off
 [ "${CODEBOX_APP:-}" = "claude-code" ] && {
-    tmux bind -T root WheelUpPane   if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-up"   "copy-mode -e \; send-keys -X -N 3 scroll-up"
+    tmux bind -T root WheelUpPane   if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-up"   "copy-mode -e"
     tmux bind -T root WheelDownPane if-shell -F "#{pane_in_mode}" "send-keys -X -N 3 scroll-down" ""
+    tmux bind C-r run-shell "kill -WINCH #{pane_pid} 2>/dev/null; sleep 0.05; kill -WINCH #{pane_pid} 2>/dev/null"
+    tmux set-hook -g client-resized "run-shell -b 'kill -WINCH #{pane_pid} 2>/dev/null; sleep 0.05; kill -WINCH #{pane_pid} 2>/dev/null'"
 }
 exec tmux -u attach -t "$TMUX_SESSION"
 WRAPPER
